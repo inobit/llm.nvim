@@ -14,7 +14,7 @@ use lazy.nvim
 ```lua
 return {
   {
-    url = "https://gitee.com/inobit/llm.nvim.git"
+    url = "https://gitee.com/inobit/llm.nvim.git",
     dependencies = {
       "nvim-lua/plenary.nvim",
     },
@@ -77,5 +77,56 @@ return {
       content_height_percentage = 0.2,
       winblend = 5,
     },
+}
+```
+
+# Integration
+
+You can use the **render-markdown.nvim** plugin to render the AI's response.
+
+Set the following in your options file:
+
+```lua
+vim.g.inobit_filetype = "inobit"
+```
+
+Register treesitter in file `after/ftplugin/inobit.lua`:
+
+```lua
+vim.treesitter.language.register("markdown", vim.g.inobit_filetype)
+```
+
+Configure `render-markdown`:
+
+Alone or as a dependency.
+
+```lua
+
+return {
+  "MeanderingProgrammer/render-markdown.nvim",
+  dependencies = {
+    "nvim-treesitter/nvim-treesitter",
+    "nvim-tree/nvim-web-devicons",
+  }, -- if you prefer nvim-web-devicons
+  opts = {
+    -- Vim modes that will show a rendered view of the markdown file
+    -- All other modes will be unaffected by this plugin
+    -- render_modes = { "n", "c" },
+    render_modes = true,
+    code = {
+      sign = false,
+      width = "full",
+      -- right_pad = 1,
+    },
+    heading = {
+      sign = false,
+      icons = {},
+    },
+    html = {
+      enabled = true,
+      comment = { conceal = false },
+    },
+  },
+  ft = { "markdown", "norg", "rmd", "org", vim.g.inobit_filetype },
 }
 ```
