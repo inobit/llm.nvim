@@ -82,7 +82,7 @@ return {
 
 # Integration
 
-You can use the **render-markdown.nvim** plugin to render the AI's response.
+You can use the [render-markdown.nvim](https://github.com/MeanderingProgrammer/render-markdown.nvim) plugin to render the AI's response.
 
 Set the following in your options file:
 
@@ -98,7 +98,7 @@ vim.treesitter.language.register("markdown", vim.g.inobit_filetype)
 
 Configure `render-markdown`:
 
-Alone or as a dependency.
+> [!Note] Alone or as a dependency.
 
 ```lua
 
