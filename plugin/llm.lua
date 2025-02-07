@@ -20,4 +20,4 @@ for _, item in ipairs(system_mappings) do
     mappings.right = item.lhs
   end
 end
-require("llm.config").install_win_cursor_move_keymap(mappings)
+require("inobit.llm.config").install_win_cursor_move_keymap(mappings)

@@ -1,4 +1,4 @@
-local log = require "llm.log"
+local log = require "inobit.llm.log"
 
 local M = {}
 local opts = {

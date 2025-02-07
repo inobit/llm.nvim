@@ -31,6 +31,8 @@ return {
       { "<leader>mv", "<Cmd>LLM Servers<CR>", desc = "LLM: select server" },
       -- stylua: ignore end
     },
+    name = "inobit-llm",
+    main = "inobit/llm",
     -- your config
     opts = {},
   },
@@ -43,7 +45,7 @@ return {
 {
   servers = {
     {
-    server = SERVERS.DEEP_SEEK,
+    server = "DeepSeek"
     base_url = "https://api.deepseek.com/v1/chat/completions",
     model = "deepseek-chat",
     stream = true,
@@ -51,7 +53,7 @@ return {
     user_role = "user",
       }
     },
-    default_server = SERVERS.DEEP_SEEK,
+    default_server = "DeepSeek",
     loading_mark = "**Generating response ...**",
     user_prompt = "❯",
     question_hi = { fg = "#1abc9c" },

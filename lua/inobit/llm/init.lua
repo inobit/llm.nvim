@@ -2,11 +2,11 @@ local M = {}
 
 -- options
 function M.setup(opts)
-  local config = require "llm.config"
+  local config = require "inobit.llm.config"
   config.setup(opts)
-  local api = require "llm.api"
-  local servers = require "llm.servers"
-  local notify = require "llm.notify"
+  local api = require "inobit.llm.api"
+  local servers = require "inobit.llm.servers"
+  local notify = require "inobit.llm.notify"
   -- ensure default server is selected
   servers.set_server_selected(config.options.default_server)
 

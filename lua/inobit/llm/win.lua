@@ -1,6 +1,6 @@
 local M = {}
-local config = require "llm.config"
-local util = require "llm.util"
+local config = require "inobit.llm.config"
+local util = require "inobit.llm.util"
 
 --TODO: refactor through metatable/prototype
 

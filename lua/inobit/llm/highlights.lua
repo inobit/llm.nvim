@@ -1,6 +1,6 @@
 local M = {}
 
-local config = require "llm.config"
+local config = require "inobit.llm.config"
 
 vim.api.nvim_set_hl(0, "InobitQuestion", config.options.question_hi)
 

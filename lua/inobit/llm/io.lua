@@ -1,4 +1,4 @@
-local log = require "llm.log"
+local log = require "inobit.llm.log"
 local Path = require "plenary.path"
 local Job = require "plenary.job"
 local uv = vim.uv or vim.loop

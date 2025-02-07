@@ -1,20 +1,19 @@
 local M = {}
 
-local log = require "llm.log"
-local io = require "llm.io"
-local util = require "llm.util"
-local notify = require "llm.notify"
-local SERVERS = require "llm.servers.const"
-local config = require "llm.config"
-local win = require "llm.win"
+local log = require "inobit.llm.log"
+local io = require "inobit.llm.io"
+local util = require "inobit.llm.util"
+local notify = require "inobit.llm.notify"
+local SERVERS = require "inobit.llm.servers.const"
+local config = require "inobit.llm.config"
+local win = require "inobit.llm.win"
 
 -- need set up after config.setup()
 local server_selected = config.options.default_server
 
 local function update_auth(server_name, key)
   config.options.servers[server_name].api_key = key
-  local _, err =
-    io.write_json(config.get_config_file_path(server_name), { api_key = key })
+  local _, err = io.write_json(config.get_config_file_path(server_name), { api_key = key })
   if err then
     log.error(err)
   end
@@ -22,12 +21,9 @@ end
 
 local function input_api_key(server_name)
   local key = nil
-  vim.ui.input(
-    { prompt = "Enter your " .. server_name .. " API Key: " },
-    function(input)
-      key = input and tostring(input)
-    end
-  )
+  vim.ui.input({ prompt = "Enter your " .. server_name .. " API Key: " }, function(input)
+    key = input and tostring(input)
+  end)
   if not util.empty_str(key) then
     return key
   end
@@ -95,8 +91,7 @@ end
 
 -- TODO: add more check
 local function check_deepseek_options()
-  config.options.servers[SERVERS.DEEP_SEEK].build_request =
-    build_deepseek_request
+  config.options.servers[SERVERS.DEEP_SEEK].build_request = build_deepseek_request
   return true
 end
 

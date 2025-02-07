@@ -1,12 +1,12 @@
 local M = {}
 
-local util = require "llm.util"
-local servers = require "llm.servers"
-local notify = require "llm.notify"
-local config = require "llm.config"
-local win = require "llm.win"
-local io = require "llm.io"
-local hl = require "llm.highlights"
+local util = require "inobit.llm.util"
+local servers = require "inobit.llm.servers"
+local notify = require "inobit.llm.notify"
+local config = require "inobit.llm.config"
+local win = require "inobit.llm.win"
+local io = require "inobit.llm.io"
+local hl = require "inobit.llm.highlights"
 
 local session_name = nil
 -- current seesion

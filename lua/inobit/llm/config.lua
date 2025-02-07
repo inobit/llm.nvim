@@ -1,6 +1,6 @@
 local M = {}
 
-local SERVERS = require "llm.servers.const"
+local SERVERS = require "inobit.llm.servers.const"
 
 local default_servers = {
   {
