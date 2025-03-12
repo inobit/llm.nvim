@@ -88,13 +88,12 @@ local function handle_response(err, out)
   end)
 end
 
-local function send_request(input)
-  local args = servers.get_server_selected().build_request(input)
+local function send_request(args, prev_handler, handler, post_handler)
   if active_job then
     active_job:shutdown()
     active_job = nil
   end
-  active_job = io.curl(args, handle_response_prev, handle_response, handle_response_post)
+  active_job = io.curl(args, prev_handler, handler, post_handler)
   active_job:start()
 end
 
@@ -135,13 +134,26 @@ local function handle_input()
   -- send to LLM
   local message = { role = servers.get_server_selected().user_role, content = input }
   session.write_request_to_session(message)
+
+  -- build request
+  local args = servers.get_server_selected().build_request(input)
   -- send session
   if servers.get_server_selected().multi_round then
     --TODO: max_tokens
-    send_request(session.get_session())
+    send_request(
+      servers.get_server_selected().build_request(session.get_session()),
+      handle_response_prev,
+      handle_response,
+      handle_response_post
+    )
   else
     -- send current input
-    send_request(message)
+    send_request(
+      servers.get_server_selected().build_request(message),
+      handle_response_prev,
+      handle_response,
+      handle_response_post
+    )
   end
 end
 

@@ -67,9 +67,13 @@ local function check_api_key(server_name)
   return check
 end
 
-local DEEP_SEEK = "DeepSeek"
-local function build_deepseek_request(input)
-  local server_name = DEEP_SEEK
+local function build_request(server_name, input, params)
+  params = vim.tbl_deep_extend("force", {}, {
+    model = config.options.servers[server_name].model,
+    messages = input,
+    stream = config.options.servers[server_name].stream,
+  }, params or {})
+
   local args = {
     config.options.servers[server_name].base_url,
     "-N",
@@ -80,18 +84,16 @@ local function build_deepseek_request(input)
     "-H",
     "Authorization: Bearer " .. config.options.servers[server_name].api_key,
     "-d",
-    vim.json.encode {
-      model = config.options.servers[server_name].model,
-      messages = input,
-      stream = config.options.servers[server_name].stream,
-    },
+    vim.json.encode(params),
   }
   return args
 end
 
 -- TODO: add more check
-local function check_deepseek_options()
-  config.options.servers[DEEP_SEEK].build_request = build_deepseek_request
+local function check_build_options(server_name)
+  config.options.servers[server_name].build_request = function(input, params)
+    return build_request(server_name, input, params)
+  end
   return true
 end
 
@@ -100,10 +102,8 @@ function M.check_options(server_name)
   if not check_common_options(server_name) then
     check = false
   end
-  if server_name == DEEP_SEEK then
-    if not check_deepseek_options() then
-      check = false
-    end
+  if not check_build_options(server_name) then
+    check = false
   end
   if not check_api_key(server_name) then
     check = false

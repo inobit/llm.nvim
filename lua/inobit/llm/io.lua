@@ -36,18 +36,26 @@ function M.curl(args, handle_prev, handle_response, handle_post)
     command = "curl",
     args = args,
     on_start = function()
-      handle_prev()
+      if handle_prev then
+        handle_prev()
+      end
     end,
     on_stdout = function(_, out)
-      handle_response(nil, out)
+      if handle_response then
+        handle_response(nil, out)
+      end
     end,
     on_stderr = function(err, _)
-      handle_response(err, nil)
+      if handle_response then
+        handle_response(err, nil)
+      end
     end,
     on_exit = function(_, code)
       vim.schedule(function()
         M.handle_exit_code(code)
-        handle_post()
+        if handle_post then
+          handle_post()
+        end
       end)
     end,
   }
