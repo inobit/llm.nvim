@@ -135,8 +135,6 @@ local function handle_input()
   local message = { role = servers.get_server_selected().user_role, content = input }
   session.write_request_to_session(message)
 
-  -- build request
-  local args = servers.get_server_selected().build_request(input)
   -- send session
   if servers.get_server_selected().multi_round then
     --TODO: max_tokens
