@@ -17,6 +17,8 @@ function M.setup(opts)
       api.start_chat()
     elseif command == "Chat" then
       api.start_chat()
+    elseif command == "ShutDown" then
+      api.shutdown_chat()
     elseif command == "Auth" then
       api.input_auth()
     elseif command == "New" then

@@ -206,6 +206,13 @@ function M.start_chat()
   end
 end
 
+function M.shutdown_chat()
+  if active_job then
+    active_job:shutdown()
+    active_job = nil
+  end
+end
+
 function M.save()
   session.save_session()
 end
