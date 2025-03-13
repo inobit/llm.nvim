@@ -10,12 +10,20 @@ local default_servers = {
     multi_round = true,
     user_role = "user",
   },
+  {
+    server = "DeepSeek-硅基",
+    base_url = "https://api.siliconflow.cn/v1/chat/completions",
+    model = "deepseek-ai/DeepSeek-V3",
+    stream = true,
+    multi_round = true,
+    user_role = "user",
+  },
 }
 
 function M.defaults()
   return {
     servers = {},
-    default_server = "DeepSeek",
+    default_server = "DeepSeek-硅基",
     loading_mark = "**Generating response ...**",
     user_prompt = "❯",
     question_hi = { fg = "#1abc9c" },
