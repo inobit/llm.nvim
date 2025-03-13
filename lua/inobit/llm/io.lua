@@ -31,33 +31,14 @@ function M.handle_exit_code(code)
   end
 end
 
-function M.curl(args, handle_prev, handle_response, handle_post)
+function M.stream_curl(args, handle_prev, handle_response, handle_post)
   local active_job = Job:new {
     command = "curl",
     args = args,
-    on_start = function()
-      if handle_prev then
-        handle_prev()
-      end
-    end,
-    on_stdout = function(_, out)
-      if handle_response then
-        handle_response(nil, out)
-      end
-    end,
-    on_stderr = function(err, _)
-      if handle_response then
-        handle_response(err, nil)
-      end
-    end,
-    on_exit = function(_, code)
-      vim.schedule(function()
-        M.handle_exit_code(code)
-        if handle_post then
-          handle_post()
-        end
-      end)
-    end,
+    on_start = handle_prev,
+    on_stdout = handle_response,
+    on_stderr = handle_response,
+    on_exit = handle_post,
   }
   return active_job
 end

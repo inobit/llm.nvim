@@ -67,7 +67,7 @@ local function check_api_key(server_name)
   return check
 end
 
-local function build_request(server_name, input, params)
+local function build_stream_curl_request(server_name, input, params)
   params = vim.tbl_deep_extend("force", {}, {
     model = config.options.servers[server_name].model,
     messages = input,
@@ -84,7 +84,7 @@ local function build_request(server_name, input, params)
     "-H",
     "Authorization: Bearer " .. config.options.servers[server_name].api_key,
     "-d",
-    vim.json.encode(params),
+    vim.fn.json_encode(params),
   }
   return args
 end
@@ -92,7 +92,7 @@ end
 -- TODO: add more check
 local function check_build_options(server_name)
   config.options.servers[server_name].build_request = function(input, params)
-    return build_request(server_name, input, params)
+    return build_stream_curl_request(server_name, input, params)
   end
   return true
 end

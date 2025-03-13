@@ -22,9 +22,7 @@ local function handle_line(line, process_data)
       return true
     end
     local data = vim.json.decode(json)
-    vim.schedule(function()
-      process_data(data)
-    end)
+    process_data(data)
   end
   return false
 end
@@ -65,12 +63,10 @@ end
 
 local function handle_response(err, out)
   if not first_response then
-    vim.schedule(handle_first_response)
+    handle_first_response()
   end
   if err then
-    vim.schedule(function()
-      notify.error(err, err)
-    end)
+    notify.error(err, err)
     return
   end
 
@@ -93,7 +89,8 @@ local function send_request(args, prev_handler, handler, post_handler)
     active_job:shutdown()
     active_job = nil
   end
-  active_job = io.curl(args, prev_handler, handler, post_handler)
+  active_job = io.stream_curl(args, nil, handler, post_handler)
+  prev_handler()
   active_job:start()
 end
 
@@ -138,19 +135,21 @@ local function handle_input()
   -- send session
   if servers.get_server_selected().multi_round then
     --TODO: max_tokens
+
+    -- use Job
     send_request(
       servers.get_server_selected().build_request(session.get_session()),
-      handle_response_prev,
-      handle_response,
-      handle_response_post
+      vim.schedule_wrap(handle_response_prev),
+      vim.schedule_wrap(handle_response),
+      vim.schedule_wrap(handle_response_post)
     )
   else
     -- send current input
     send_request(
-      servers.get_server_selected().build_request(message),
-      handle_response_prev,
-      handle_response,
-      handle_response_post
+      servers.get_server_selected().build_request { message },
+      vim.schedule_wrap(handle_response_prev),
+      vim.schedule_wrap(handle_response),
+      vim.schedule_wrap(handle_response_post)
     )
   end
 end
