@@ -91,7 +91,7 @@ end
 
 -- TODO: add more check
 local function check_build_options(server_name)
-  config.options.servers[server_name].build_request = function(input, params)
+  config.options.servers[server_name].build_stream_curl_request = function(input, params)
     return build_stream_curl_request(server_name, input, params)
   end
   return true

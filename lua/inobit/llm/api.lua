@@ -138,7 +138,7 @@ local function handle_input()
 
     -- use Job
     send_request(
-      servers.get_server_selected().build_request(session.get_session()),
+      servers.get_server_selected().build_stream_curl_request(session.get_session()),
       vim.schedule_wrap(handle_response_prev),
       vim.schedule_wrap(handle_response),
       vim.schedule_wrap(handle_response_post)
@@ -146,7 +146,7 @@ local function handle_input()
   else
     -- send current input
     send_request(
-      servers.get_server_selected().build_request { message },
+      servers.get_server_selected().build_stream_curl_request { message },
       vim.schedule_wrap(handle_response_prev),
       vim.schedule_wrap(handle_response),
       vim.schedule_wrap(handle_response_post)
