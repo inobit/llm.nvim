@@ -101,6 +101,7 @@ function M.get_inner_text()
 end
 
 function M.replace_visual_selection(text)
+  text = vim.api.nvim_replace_termcodes(text:gsub("\n", "<CR>"), true, true, true)
   vim.cmd("normal! c" .. vim.fn.escape(text, "\\"))
 end
 
