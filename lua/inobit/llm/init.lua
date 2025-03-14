@@ -7,6 +7,7 @@ function M.setup(opts)
   local chat = require "inobit.llm.chat"
   local servers = require "inobit.llm.servers"
   local notify = require "inobit.llm.notify"
+  local translate = require "inobit.llm.translate"
   -- ensure default server is selected
   servers.set_server_selected(config.options.default_server)
 
@@ -45,6 +46,22 @@ function M.setup(opts)
       notify.warn "Invalid LLM command"
     end
   end, { desc = "llm chat", nargs = "?" })
+
+  -- translate command
+  vim.api.nvim_create_user_command("TS", function(options)
+    local args = options.fargs
+    local type = args[1]
+    local text = table.concat(args, " ", 2)
+    translate.translate(
+      type,
+      text,
+      vim.schedule_wrap(function(content)
+        -- write to "t" register
+        vim.fn.setreg("t", content)
+        print(content)
+      end)
+    )
+  end, { desc = "llm translate", nargs = "*" })
 end
 
 return M

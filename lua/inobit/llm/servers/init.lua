@@ -89,10 +89,27 @@ local function build_stream_curl_request(server_name, input, params)
   return args
 end
 
--- TODO: add more check
+local function build_curl_request(server_name, input, params)
+  local body = vim.tbl_deep_extend("force", {}, {
+    model = config.options.servers[server_name].model,
+    messages = input,
+    stream = config.options.servers[server_name].stream,
+  }, params or {})
+  local headers = {
+    content_type = "application/json",
+    authorization = "Bearer " .. config.options.servers[server_name].api_key,
+  }
+
+  return config.options.servers[server_name].base_url, { body = vim.fn.json_encode(body), headers = headers }
+end
+
+-- todo: add more check
 local function check_build_options(server_name)
   config.options.servers[server_name].build_stream_curl_request = function(input, params)
     return build_stream_curl_request(server_name, input, params)
+  end
+  config.options.servers[server_name].build_curl_request = function(input, params)
+    return build_curl_request(server_name, input, params)
   end
   return true
 end

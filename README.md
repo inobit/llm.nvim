@@ -6,6 +6,11 @@ AI chat, currently supports DeepSeek
 
 - floating chat window
 - session manage
+- translate
+  one can directly translate and replace in the buffer, or use the TS command to translate the specified content(the result will be output to the `t` register).
+  ```shell
+  :TS { E2Z | Z2E | Z2E_CAMEL | Z2E_UNDERLINE } <text>
+  ```
 
 # Installation
 
@@ -29,9 +34,21 @@ return {
       { "<leader>md", "<Cmd>LLM Delete<CR>", desc = "LLM: delete session" },
       { "<leader>mr", "<Cmd>LLM Rename<CR>", desc = "LLM: rename session" },
       { "<leader>mv", "<Cmd>LLM Servers<CR>", desc = "LLM: select server" },
+      {
+        "<leader>tsz", function() require("inobit.llm.translate").translate_and_repalce "E2Z" end, mode = { "n", "v" }, desc = "LLM: translate to ZH",
+      },
+      {
+        "<leader>tse", function() require("inobit.llm.translate").translate_and_repalce "Z2E" end, mode = { "n", "v" }, desc = "LLM: translate to EN",
+      },
+      {
+        "<leader>tsc", function() require("inobit.llm.translate").translate_and_repalce "Z2E_CAMEL" end, mode = { "n", "v" }, desc = "LLM: translate to VAR_CAMEL",
+      },
+      {
+        "<leader>tsu", function() require("inobit.llm.translate").translate_and_repalce "Z2E_UNDERLINE" end, mode = { "n", "v" }, desc = "LLM: translate to VAR_UNDERLINE",
+      },
       -- stylua: ignore end
     },
-    name = "inobit-llm",
+    cmd = { "LLM", "TS" },
     main = "inobit/llm",
     -- your config
     opts = {},
@@ -48,6 +65,14 @@ return {
     server = "DeepSeek"
     base_url = "https://api.deepseek.com/v1/chat/completions",
     model = "deepseek-chat",
+    stream = true,
+    multi_round = true,
+    user_role = "user",
+      }
+    {
+    server = "DeepSeek-硅基",
+    base_url = "https://api.siliconflow.cn/v1/chat/completions",
+    model = "deepseek-ai/DeepSeek-V3",
     stream = true,
     multi_round = true,
     user_role = "user",

@@ -74,4 +74,43 @@ function M.add_line_separator(bufnr)
   vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, { "", "" })
 end
 
+function M.get_visual_text()
+  local mode = vim.api.nvim_get_mode().mode
+  local opts = {}
+  -- \22 is an escaped version of <c-v>
+  if mode == "v" or mode == "V" or mode == "\22" then
+    opts.type = mode
+  end
+  return table.concat(vim.fn.getregion(vim.fn.getpos "v", vim.fn.getpos ".", opts), "\n")
+end
+
+function M.get_inner_text()
+  -- save current location
+  local cursor_pos = vim.api.nvim_win_get_cursor(0)
+
+  -- select under the cursor iw (inner word)
+  vim.cmd "normal! yiw"
+
+  -- retrieve the copied text
+  local text = vim.fn.getreg '"'
+
+  -- restore cursor position
+  vim.api.nvim_win_set_cursor(0, cursor_pos)
+
+  return text
+end
+
+function M.replace_visual_selection(text)
+  vim.cmd("normal! c" .. vim.fn.escape(text, "\\"))
+end
+
+function M.replace_inner_word(text)
+  local cursor_pos = vim.api.nvim_win_get_cursor(0)
+
+  vim.cmd("normal! ciw" .. vim.fn.escape(text, "\\"))
+
+  -- restore cursor position
+  vim.api.nvim_win_set_cursor(0, cursor_pos)
+end
+
 return M
