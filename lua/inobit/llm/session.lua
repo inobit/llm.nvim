@@ -7,6 +7,7 @@ local config = require "inobit.llm.config"
 local win = require "inobit.llm.win"
 local io = require "inobit.llm.io"
 local hl = require "inobit.llm.highlights"
+local Path = require "plenary.path"
 
 local session_name = nil
 -- current seesion
@@ -53,16 +54,7 @@ end
 
 function M.get_session_file_path(server, name)
   if server and name then
-    return config.options.base_config_dir
-      .. "/"
-      .. config.options.session_dir
-      .. "/"
-      .. server
-      .. "/"
-      .. name
-      .. ".json"
-  else
-    return nil
+    return Path:new(config.get_session_dir(server)):joinpath(name .. ".json").filename
   end
 end
 
@@ -255,7 +247,7 @@ function M.load_sessions(server)
     notify.error "No server selected"
     return
   end
-  local dir = config.options.base_config_dir .. "/" .. config.options.session_dir .. "/" .. server
+  local dir = config.get_session_dir(server)
   local files = io.get_files(dir)
   if files and #files > 0 then
     files = vim.tbl_map(function(file)

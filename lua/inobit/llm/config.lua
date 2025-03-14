@@ -1,5 +1,7 @@
 local M = {}
 
+local Path = require "plenary.path"
+
 local default_servers = {
   {
 
@@ -71,15 +73,13 @@ end
 
 function M.get_config_file_path(server_name)
   if server_name then
-    return M.options.base_config_dir
-      .. "/"
-      .. M.options.config_dir
-      .. "/"
-      .. server_name
-      .. "/"
-      .. M.options.config_filename
-  else
-    return nil
+    return Path:new(M.options.base_config_dir, M.options.config_dir, server_name, M.options.config_filename).filename
+  end
+end
+
+function M.get_session_dir(server_name)
+  if server_name then
+    return Path:new(M.options.base_config_dir, M.options.session_dir, server_name).filename
   end
 end
 
