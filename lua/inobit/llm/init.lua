@@ -4,7 +4,7 @@ local M = {}
 function M.setup(opts)
   local config = require "inobit.llm.config"
   config.setup(opts)
-  local api = require "inobit.llm.api"
+  local chat = require "inobit.llm.chat"
   local servers = require "inobit.llm.servers"
   local notify = require "inobit.llm.notify"
   -- ensure default server is selected
@@ -14,33 +14,33 @@ function M.setup(opts)
     local args = options.fargs
     local command = args[1]
     if command == nil then
-      api.start_chat()
+      chat.start_chat()
     elseif command == "Chat" then
-      api.start_chat()
+      chat.start_chat()
     elseif command == "ShutDown" then
-      api.shutdown_chat()
+      chat.shutdown_chat()
     elseif command == "Auth" then
-      api.input_auth()
+      chat.input_auth()
     elseif command == "New" then
-      api.new()
+      chat.new()
     elseif command == "Clear" then
-      if api.clear then
-        api.clear()
+      if chat.clear then
+        chat.clear()
       end
     elseif command == "Save" then
-      api.save()
+      chat.save()
     elseif command == "Sessions" then -- select session
-      api.select_sessions()
+      chat.select_sessions()
     elseif command == "Delete" then -- delete session
-      if api.delete_session then
-        api.delete_session()
+      if chat.delete_session then
+        chat.delete_session()
       end
     elseif command == "Rename" then -- rename session
-      if api.rename_session then
-        api.rename_session()
+      if chat.rename_session then
+        chat.rename_session()
       end
     elseif command == "Servers" then
-      api.select_server()
+      chat.select_server()
     else
       notify.warn "Invalid LLM command"
     end
