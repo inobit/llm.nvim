@@ -102,7 +102,9 @@ function M.translate(type, text, callback)
       local body = vim.json.decode(res.body)
       callback(body.choices[1].message.content)
     else
-      notify.error(string.format "Translate %s error %s", res.status, res.body)
+      vim.schedule(function()
+        notify.error(string.format("Translate %s error: %s", res.status, res.body))
+      end)
     end
   end
   curl.post(url, opts) -- async when stream or callback is exsit
