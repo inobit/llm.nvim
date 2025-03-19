@@ -9,15 +9,14 @@ local win = require "inobit.llm.win"
 -- translate
 local function build_translation_prompt(params)
   local system_prompt = [[
-        作为专业语言处理引擎，执行精确的文本翻译任务。请将源语言内容准确转换为目标语言。
-        翻译要求：
-        1. 保持原文语义完整性
-        2. 符合目标语言语法规范
-        3. 保留专业术语原意
-        4. 仅输出结果（不带任何注释）
-        5. 输出格式：%s]]
+    As a professional language processing engine, perform precise text translation tasks. please accurately convert the source language content to the target language. translation requirements: 
+    1. maintain the semantic integrity of the original text. 
+    2. comply with the grammatical norms of the target language. 
+    3. retain the original meaning of professional terms. 
+    4. output the result only (without any comments). 
+    5. output format: %s]]
   system_prompt = system_prompt:format(params.output_type)
-  local content = "将以下%s语句翻译为%s：'%s'"
+  local content = "translate the following %s statement into %s：'%s'"
   content = content:format(params.source_lang, params.target_lang, params.text:gsub("'", "''"))
 
   return {
@@ -28,36 +27,36 @@ end
 
 local function translate_en_to_zh(text)
   return build_translation_prompt {
-    output_type = "纯文本",
-    source_lang = "英语",
-    target_lang = "简体中文",
+    output_type = "plain text",
+    source_lang = "english",
+    target_lang = "simplified chinese",
     text = text,
   }
 end
 
 local function translate_zh_to_en_text(text)
   return build_translation_prompt {
-    output_type = "纯文本(使用自然语言,首字母小写)",
-    source_lang = "简体中文",
-    target_lang = "英语",
+    output_type = "plain text, use natural language, first letter lowercase",
+    source_lang = "simplified chinese",
+    target_lang = "english",
     text = text,
   }
 end
 
 local function translate_zh_to_en_var_camel(text)
   return build_translation_prompt {
-    output_type = "驼峰命名形式的变量(如果超过20个字符则进行合理的简写)",
-    source_lang = "简体中文",
-    target_lang = "英语",
+    output_type = "variables in camel case, if the variables character count is greater than 20, then perform reasonable abbreviation.",
+    source_lang = "simplified chinese",
+    target_lang = "english",
     text = text,
   }
 end
 
 local function translate_zh_to_en_var_underline(text)
   return build_translation_prompt {
-    output_type = "下划线命名形式的变量(如果超过20个字符则进行合理的简写)",
-    source_lang = "简体中文",
-    target_lang = "英语",
+    output_type = "variables in underscore naming convention, if the variables character count is greater than 20, then perform reasonable abbreviation.",
+    source_lang = "simplified chinese",
+    target_lang = "english",
     text = text,
   }
 end
