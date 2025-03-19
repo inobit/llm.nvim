@@ -20,9 +20,12 @@ end
 
 local function input_api_key(server_name)
   local key = nil
-  vim.ui.input({ prompt = "Enter your " .. server_name .. " API Key: " }, function(input)
-    key = input and tostring(input)
-  end)
+  -- async input
+  -- vim.ui.input({ prompt = "Enter your " .. server_name .. " API Key: " }, function(input)
+  --   key = input and tostring(input)
+  -- end)
+  -- use sync input
+  key = vim.fn.inputsecret("Enter your " .. server_name .. " API Key: ")
   if not util.empty_str(key) then
     return key
   end
