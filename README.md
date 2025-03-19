@@ -7,7 +7,7 @@ AI chat, currently supports DeepSeek
 - floating chat window
 - session manage
 - translate
-  one can directly translate and replace in the buffer, or use the TS command to translate the specified content(the result will be output to the `t` register).
+  one can directly translate and replace in the buffer, or use the TS command to translate the specified content(the result will be displayed in a floating window).
   ```shell
   :TS { E2Z | Z2E | Z2E_CAMEL | Z2E_UNDERLINE } <text>
   ```
@@ -25,7 +25,7 @@ return {
     },
     keys = {
       -- stylua: ignore start
-      { "<leader>mm", "<Cmd>LLM Chat<CR>", desc = "LLM: chat start" },
+      { "<leader>mc", "<Cmd>LLM Chat<CR>", desc = "LLM: chat start" },
       { "<leader>ma", "<Cmd>LLM Auth<CR>", desc = "LLM: chat auth" },
       { "<leader>mn", "<Cmd>LLM New<CR>", desc = "LLM: chat new" },
       { "<leader>mx", "<Cmd>LLM Clear<CR>", desc = "LLM: chat clear(unsaved)" },
@@ -35,16 +35,22 @@ return {
       { "<leader>mr", "<Cmd>LLM Rename<CR>", desc = "LLM: rename session" },
       { "<leader>mv", "<Cmd>LLM Servers<CR>", desc = "LLM: select server" },
       {
-        "<leader>tsz", function() require("inobit.llm.translate").translate_and_repalce "E2Z" end, mode = { "n", "v" }, desc = "LLM: translate to ZH",
+        "<leader>tsz", function() require("inobit.llm.translate").translate_and_repalce "E2Z" end, mode = { "n", "v" }, desc = "LLM: translate and replace to ZH",
       },
       {
-        "<leader>tse", function() require("inobit.llm.translate").translate_and_repalce "Z2E" end, mode = { "n", "v" }, desc = "LLM: translate to EN",
+        "<leader>tse", function() require("inobit.llm.translate").translate_and_repalce "Z2E" end, mode = { "n", "v" }, desc = "LLM: translate and replace to EN",
       },
       {
         "<leader>tsc", function() require("inobit.llm.translate").translate_and_repalce "Z2E_CAMEL" end, mode = { "n", "v" }, desc = "LLM: translate to VAR_CAMEL",
       },
       {
         "<leader>tsu", function() require("inobit.llm.translate").translate_and_repalce "Z2E_UNDERLINE" end, mode = { "n", "v" }, desc = "LLM: translate to VAR_UNDERLINE",
+      },
+      {
+        "<leader>tpz", function() require("inobit.llm.translate").translate_and_print "E2Z" end, mode = { "n", "v" }, desc = "LLM: translate and print to ZH",
+      },
+      {
+        "<leader>tpe", function() require("inobit.llm.translate").translate_and_print "Z2E" end, mode = { "n", "v" }, desc = "LLM: translate and print to EN",
       },
       -- stylua: ignore end
     },
@@ -70,7 +76,7 @@ return {
     user_role = "user",
       }
     {
-    server = "DeepSeek-硅基",
+    server = "DeepSeek-SiliconFlow",
     base_url = "https://api.siliconflow.cn/v1/chat/completions",
     model = "deepseek-ai/DeepSeek-V3",
     stream = true,
@@ -78,7 +84,7 @@ return {
     user_role = "user",
       }
     },
-    default_server = "DeepSeek",
+    default_server = "DeepSeek-SiliconFlow",
     loading_mark = "**Generating response ...**",
     user_prompt = "❯",
     question_hi = { fg = "#1abc9c" },
