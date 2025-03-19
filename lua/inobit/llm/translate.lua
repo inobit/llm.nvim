@@ -4,6 +4,7 @@ local servers = require "inobit.llm.servers"
 local util = require "inobit.llm.util"
 local curl = require "plenary.curl"
 local notify = require "inobit.llm.notify"
+local win = require "inobit.llm.win"
 
 -- translate
 local function build_translation_prompt(params)
@@ -116,6 +117,41 @@ function M.translate_and_repalce(type)
     M.translate(type, util.get_inner_text(), vim.schedule_wrap(util.replace_inner_word))
   else
     M.translate(type, util.get_visual_text(), vim.schedule_wrap(util.replace_visual_selection))
+  end
+end
+
+---@param content string
+function M.print_callback(content)
+  -- write to "t" register
+  -- vim.fn.setreg("t", content)
+
+  -- create floating window
+  local width = math.floor(vim.o.columns * 0.5)
+  local height = math.floor(vim.o.lines * 0.2)
+  local left = (vim.o.columns - width) / 2
+  local top = (vim.o.lines - height) / 2
+  ---@diagnostic disable-next-line: unused-local
+  local bufnr, winid = win.create_floating_window(width, height, top, left, 0, "translate result")
+
+  -- register autocmd to clean
+  vim.api.nvim_create_autocmd("WinClosed", {
+    buffer = bufnr,
+    callback = function()
+      -- pcall(vim.api.nvim_win_close, winid, true)
+      pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+    end,
+  })
+
+  -- display content
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, vim.iter(vim.gsplit(content, "\n")):totable())
+end
+
+---@param type translate_type
+function M.translate_and_print(type)
+  if vim.api.nvim_get_mode().mode == "n" then
+    M.translate(type, util.get_inner_text(), vim.schedule_wrap(M.print_callback))
+  else
+    M.translate(type, util.get_visual_text(), vim.schedule_wrap(M.print_callback))
   end
 end
 

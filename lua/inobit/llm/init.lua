@@ -52,15 +52,7 @@ function M.setup(opts)
     local args = options.fargs
     local type = args[1]
     local text = table.concat(args, " ", 2)
-    translate.translate(
-      type,
-      text,
-      vim.schedule_wrap(function(content)
-        -- write to "t" register
-        vim.fn.setreg("t", content)
-        print(content)
-      end)
-    )
+    translate.translate(type, text, vim.schedule_wrap(translate.print_callback))
   end, { desc = "llm translate", nargs = "*" })
 end
 
