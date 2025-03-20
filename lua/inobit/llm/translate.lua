@@ -65,6 +65,10 @@ end
 
 local types = { "E2Z", "Z2E", "Z2E_CAMEL", "Z2E_UNDERLINE" }
 
+function M.is_valid_type(type)
+  return vim.iter(types):find(type)
+end
+
 ---@param type translate_type
 ---@param text string
 ---@param callback fun(content: string)
@@ -110,17 +114,8 @@ function M.translate(type, text, callback)
   curl.post(url, opts) -- async when stream or callback is exsit
 end
 
----@param type translate_type
-function M.translate_and_repalce(type)
-  if vim.api.nvim_get_mode().mode == "n" then
-    M.translate(type, util.get_inner_text(), vim.schedule_wrap(util.replace_inner_word))
-  else
-    M.translate(type, util.get_visual_text(), vim.schedule_wrap(util.replace_visual_selection))
-  end
-end
-
 ---@param content string
-function M.print_callback(content)
+local function print_callback(content)
   -- write to "t" register
   -- vim.fn.setreg("t", content)
 
@@ -145,13 +140,31 @@ function M.print_callback(content)
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, vim.iter(vim.gsplit(content, "\n")):totable())
 end
 
----@param type translate_type
-function M.translate_and_print(type)
+---@param replace boolean
+---@param type? translate_type
+function M.translate_in_buffer(replace, type)
+  local text = nil
+  local callback = nil
   if vim.api.nvim_get_mode().mode == "n" then
-    M.translate(type, util.get_inner_text(), vim.schedule_wrap(M.print_callback))
+    text = util.get_inner_text()
+    callback = replace and util.replace_inner_word or print_callback
   else
-    M.translate(type, util.get_visual_text(), vim.schedule_wrap(M.print_callback))
+    text = util.get_visual_text()
+    callback = replace and util.replace_visual_selection or print_callback
   end
+  if not type then
+    type = util.is_english(text) and "E2Z" or "Z2E"
+  end
+  M.translate(type, text, vim.schedule_wrap(callback))
+end
+
+---@param text string
+---@param type? translate_type
+function M.translate_in_cmdline(text, type)
+  if not type then
+    type = util.is_english(text) and "E2Z" or "Z2E"
+  end
+  M.translate(type, text, vim.schedule_wrap(print_callback))
 end
 
 return M

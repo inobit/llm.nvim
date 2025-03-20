@@ -48,6 +48,36 @@ function M.is_legal_char(char)
   end
 end
 
+-- used for automatically determining if the translated language is English
+---@param text string
+---@param sample_size? integer
+---@param threshold? number
+---@return boolean
+function M.is_english(text, sample_size, threshold)
+  sample_size = sample_size or 500
+  threshold = threshold or 0.8
+
+  -- len for byte not char
+  local len = #text
+  if len == 0 then
+    return true
+  end
+
+  local checked = 0
+  local ascii_count = 0
+
+  for i = 1, math.min(len, sample_size) do
+    local byte = text:byte(i)
+    if byte < 128 then -- 标准ASCII范围判断
+      ascii_count = ascii_count + 1
+    end
+    checked = checked + 1
+  end
+
+  -- 计算ASCII字符占比
+  return (ascii_count / checked) >= threshold
+end
+
 function M.generate_random_string(length)
   math.randomseed(os.time())
   local chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"

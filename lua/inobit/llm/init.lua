@@ -52,8 +52,12 @@ function M.setup(opts)
     local args = options.fargs
     local type = args[1]
     local text = table.concat(args, " ", 2)
-    translate.translate(type, text, vim.schedule_wrap(translate.print_callback))
-  end, { desc = "llm translate", nargs = "*" })
+    if translate.is_valid_type(type) then
+      translate.translate_in_cmdline(text, type)
+    else
+      translate.translate_in_cmdline(type .. " " .. text)
+    end
+  end, { desc = "LLM: translate command", nargs = "*" })
 end
 
 return M
