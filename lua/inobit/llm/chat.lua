@@ -1,322 +1,486 @@
-local M = {}
-
 local util = require "inobit.llm.util"
-local io = require "inobit.llm.io"
-local notify = require "inobit.llm.notify"
 local config = require "inobit.llm.config"
-local session = require "inobit.llm.session"
-local servers = require "inobit.llm.servers"
+local SessionManager = require "inobit.llm.session"
+local ServerManager = require "inobit.llm.server"
 local win = require "inobit.llm.win"
 local hl = require "inobit.llm.highlights"
 
-local active_job = nil
-local server_role = nil
+---@class llm.chat.ActiveChatBuffer
+---@field input_bufnr? integer
+---@field response_bufnr? integer
 
-local function handle_line(line, process_data)
-  if not line then
-    return false
-  end
-  local json = line:match "^data: (.+)$"
-  if json then
-    if json == "[DONE]" then
-      return true
+---@class llm.Chat
+---@field win llm.win.ChatWin
+---@field session llm.Session
+---@field server llm.Server
+local Chat = {}
+Chat.__index = Chat
+
+---static object
+---@private
+---@type llm.Chat
+Chat._active_chat = nil
+
+---@param session? llm.Session
+---@return llm.Chat
+function Chat:new(session)
+  local input_bufnr, response_bufnr
+  local deep = true
+  ---@type llm.Chat
+  local this = setmetatable({}, Chat)
+  -- existing session,reuse buffer
+  if Chat._active_chat and ((session and session == Chat._active_chat.session) or not session) then
+    -- if the floating window is already open, do nothing.
+    if vim.api.nvim_win_is_valid(Chat._active_chat.win.floats.input.winid) then
+      return Chat._active_chat
     end
-    local data = vim.json.decode(json)
-    process_data(data)
-  end
-  return false
-end
-
-local function write_to_buf(content)
-  local row, col = util.get_last_char_position(M.response_buf)
-  local lines = vim.split(content, "\n")
-  vim.api.nvim_buf_set_text(M.response_buf, row, col, row, col, lines)
-  util.scroll_to_end(M.response_win, M.response_buf)
-end
-
-local function handle_response_prev()
-  -- show loading sign
-  vim.api.nvim_buf_set_lines(M.response_buf, -1, -1, false, { config.options.loading_mark })
-end
-
--- handle first response
-local first_response = false
-local function handle_first_response()
-  first_response = true
-  local line_count = vim.api.nvim_buf_line_count(M.response_buf)
-  -- delete loading line
-  vim.api.nvim_buf_set_lines(M.response_buf, line_count - 1, line_count, false, { "" })
-  session.record_start_point(M.response_buf)
-end
-
--- post handler
-local function handle_response_post()
-  session.write_response_to_session(server_role, M.response_buf)
-  util.add_line_separator(M.response_buf)
-  if M.register_enter_handler then
-    M.register_enter_handler()
-  end
-  active_job = nil
-  server_role = nil
-  first_response = false
-end
-
-local function handle_response(err, out)
-  if not first_response then
-    handle_first_response()
-  end
-  if err then
-    notify.error(err, err)
-    return
+    this.session = Chat._active_chat.session
+    this.server = Chat._active_chat.server
+    input_bufnr = Chat._active_chat.win.floats.input.bufnr
+    response_bufnr = Chat._active_chat.win.floats.response.bufnr
+    deep = false
+  -- existing session or new session ,new buffer
+  else
+    this.session = session
+      or SessionManager:new_session(ServerManager.chat_server.server, ServerManager.chat_server.model)
+    this.server = ServerManager.servers[this.session.server .. "@" .. this.session.model]
+    deep = true
   end
 
-  handle_line(out, function(data)
-    local content
-    if data.choices and data.choices[1] and data.choices[1].delta then
-      content = data.choices[1].delta.content
-      if data.choices[1].delta.role then
-        server_role = data.choices[1].delta.role
-      end
-    end
-    if content and content ~= vim.NIL then
-      write_to_buf(content)
-    end
+  this.win = win.ChatWin:new {
+    title = this.session.server .. "@" .. this.session.model,
+    input_bufnr = input_bufnr,
+    response_bufnr = response_bufnr,
+  }
+
+  -- asynchronous execution ensures it runs after ChatWin:new
+  vim.schedule(function()
+    Chat:_clean_old_chat(deep, this)
   end)
+
+  this:_resume_session()
+  this:_register_input_enter_keymap()
+  this:_register_new_chat_keymap()
+  return this
 end
 
-local function send_request(args, prev_handler, handler, post_handler)
-  if active_job then
-    active_job:shutdown()
-    active_job = nil
-  end
-  active_job = io.stream_curl(args, nil, handler, post_handler)
-  prev_handler()
-  active_job:start()
-end
-
--- input handler
-local function handle_input()
-  local input_lines = vim.api.nvim_buf_get_lines(M.input_buf, 0, -1, false)
-  local input = table.concat(input_lines, "\n")
-  if input == "" then
-    return
-  end
-
-  -- add user prompt
-  input_lines[1] = config.options.user_prompt .. " " .. input_lines[1]
-
-  -- clear input
-  vim.api.nvim_buf_set_lines(M.input_buf, 0, -1, false, {})
-
-  local count
-
-  -- write to response_buf
-  if
-    vim.api.nvim_buf_line_count(M.response_buf) == 1
-    and vim.api.nvim_buf_get_lines(M.response_buf, 0, 1, false)[1] == ""
-  then
-    count = 0
-    vim.api.nvim_buf_set_lines(M.response_buf, 0, -1, false, input_lines)
-  else
-    count = vim.api.nvim_buf_line_count(M.response_buf)
-    vim.api.nvim_buf_set_lines(M.response_buf, -1, -1, false, input_lines)
-  end
-
-  -- set question highlight
-  hl.set_lines_highlights(M.response_buf, count, count + #input_lines)
-
-  util.add_line_separator(M.response_buf)
-
-  util.scroll_to_end(M.response_win, M.response_buf)
-  -- send to LLM
-  local message = { role = servers.get_server_selected().user_role, content = input }
-  session.write_request_to_session(message)
-
-  -- send session
-  if servers.get_server_selected().multi_round then
-    --TODO: max_tokens
-
-    -- use Job
-    send_request(
-      servers.get_server_selected().build_stream_curl_request(session.get_session()),
-      vim.schedule_wrap(handle_response_prev),
-      vim.schedule_wrap(handle_response),
-      vim.schedule_wrap(handle_response_post)
-    )
-  else
-    -- send current input
-    send_request(
-      servers.get_server_selected().build_stream_curl_request { message },
-      vim.schedule_wrap(handle_response_prev),
-      vim.schedule_wrap(handle_response),
-      vim.schedule_wrap(handle_response_post)
-    )
-  end
-end
-
-local function clear_chat_win()
-  M.response_buf = nil
-  M.response_win = nil
-  M.input_buf = nil
-  M.input_win = nil
-  -- get input
-  M.clear = nil
-  win.disable_auto_skip_when_insert()
-end
-
-local function record_input()
-  M.input_cache = vim.api.nvim_buf_get_lines(M.input_buf, 0, -1, false)
-end
--- submit input
-local function submit()
-  if not M.input_buf or not M.response_buf then
-    return
-  end
-  handle_input()
-end
-
--- 启动对话
-function M.start_chat()
-  local check = servers.check_options(servers.get_server_selected().server)
-  if not check then
-    return
-  end
-  if M.input_buf and M.response_buf then
-    M.new()
-    return
-  end
-  -- create chat window
-  M.response_buf, M.response_win, M.input_buf, M.input_win, M.register_enter_handler =
-    win.create_chat_win(servers.get_server_selected().server, submit, record_input, clear_chat_win)
-  session.resume_session(M.response_buf)
-  util.scroll_to_end(M.response_win, M.response_buf)
-
-  if M.input_buf then
-    -- resume cache
-    if M.input_cache and #M.input_cache > 0 then
-      vim.api.nvim_buf_set_lines(M.input_buf, 0, -1, false, M.input_cache)
+---static function,self must be Chat
+---@private
+---@param deep boolean
+---@param new_chat llm.Chat
+function Chat:_clean_old_chat(deep, new_chat)
+  if Chat._active_chat then
+    win.WinStack:delete(Chat._active_chat.win.floats.response.winid)
+    win.WinStack:delete(Chat._active_chat.win.floats.input.winid)
+    if #Chat._active_chat.session.content > 0 then
+      Chat._active_chat.session:save()
     end
-
-    -- functions that depend on chat windows
-    M.clear = function()
-      session.clear_session(false)
-      vim.api.nvim_buf_set_lines(M.input_buf, 0, -1, false, {})
-      vim.api.nvim_buf_set_lines(M.response_buf, 0, -1, false, {})
+    Chat._active_chat.win.floats.response:close()
+    if deep then
+      pcall(vim.api.nvim_buf_delete, Chat._active_chat.win.floats.input.bufnr, { force = true })
+      pcall(vim.api.nvim_buf_delete, Chat._active_chat.win.floats.response.bufnr, { force = true })
     end
   end
+  Chat._active_chat = new_chat
 end
 
-function M.shutdown_chat()
-  if active_job then
-    active_job:shutdown()
-    active_job = nil
-  end
-end
-
-function M.save()
-  session.save_session()
-end
-
-function M.new()
-  session.clear_session(true)
-  if not M.input_buf or not M.response_buf then
-    M.start_chat()
+---@private
+---@return integer
+function Chat:_set_header()
+  local headers = {
+    string.format("- **server@model**: %s@%s", self.session.server, self.session.model),
+    string.format("- **create time**: %s", os.date("%Y-%m-%d %H:%M:%S", self.session.create_time)),
+    string.format("- **session name**: %s", self.session.name),
+    string.format("- **session id**: %s", self.session.id),
+  }
+  if vim.api.nvim_buf_get_lines(self.win.floats.response.bufnr, 0, 1, false)[1] ~= "" then
+    vim.api.nvim_buf_set_lines(self.win.floats.response.bufnr, 0, 4, false, headers)
   else
-    vim.api.nvim_buf_set_lines(M.input_buf, 0, -1, false, {})
-    vim.api.nvim_buf_set_lines(M.response_buf, 0, -1, false, {})
+    self:_write_lines_to_response(headers)
   end
+  return #headers
 end
 
-function M.input_auth()
-  servers.input_auth(servers.get_server_selected().server)
-end
-
-function M.select_sessions()
-  if session.input_buf then
+---@private
+function Chat:_resume_session()
+  vim.api.nvim_set_current_win(self.win.floats.response.winid)
+  self:_render()
+  local head_len = self:_set_header()
+  if vim.api.nvim_buf_line_count(self.win.floats.response.bufnr) > head_len + 1 then
+    -- do nothing when the session is not empty
+    vim.api.nvim_set_current_win(self.win.floats.input.winid)
     return
   end
-  --TODO:
-  ---@diagnostic disable-next-line: unused-local
-  local input_buf, input_win, content_buf, content_win = session.create_session_picker_win(
-    -- enter callback
-    function()
-      if M.input_buf and M.response_buf then
-        session.resume_session(M.response_buf)
-      -- if M.input_win then
-      --   vim.api.nvim_set_current_win(M.input_win)
-      -- end
+  if not vim.tbl_isempty(self.session.content) then
+    for _, message in ipairs(self.session.content) do
+      if message.role == (self.server.user_role or "user") then
+        -- user message
+        self:_write_lines_to_response(self:_build_input_render_style(vim.split(message.content, "\n")))
       else
-        M.start_chat()
-      end
-    end,
-    -- close callback
-    function()
-      M.delete_session = nil
-      M.rename_session = nil
-    end
-  )
-
-  -- functions that depend on session selection windows
-  if input_buf then
-    M.delete_session = function()
-      local selected_line = vim.api.nvim_win_get_cursor(content_win)
-      if selected_line then
-        local lines = vim.api.nvim_buf_get_lines(content_buf, selected_line[1] - 1, selected_line[1], false)
-        if lines and lines[1] and lines[1] ~= "" then
-          local tip = "Delete session: "
-            .. (vim.fn.strchars(lines[1]) > 20 and (vim.fn.strcharpart(lines[1], 0, 20) .. "...") or lines[1])
-            .. "? (Y/N): "
-
-          local answer = vim.fn.input(tip)
-          answer = string.upper(answer)
-          if answer == "Y" then
-            local session_name = session.delete_session(lines[1])
-            vim.api.nvim_buf_set_lines(content_buf, selected_line[1] - 1, selected_line[1], false, {})
-            -- current session
-            if session_name and M.response_buf then
-              vim.api.nvim_buf_set_lines(M.response_buf, 0, -1, false, {})
-            end
-          elseif answer == "N" then
-          elseif answer == "" then
-          else
-            notify.warn "Invalid input. Please enter Y or N."
-          end
-        end
-      end
-    end
-
-    M.rename_session = function()
-      local selected_line = vim.api.nvim_win_get_cursor(content_win)
-      if selected_line then
-        local lines = vim.api.nvim_buf_get_lines(content_buf, selected_line[1] - 1, selected_line[1], false)
-        if lines and lines[1] and lines[1] ~= "" then
-          local success, str = session.rename_session(lines[1])
-          if success then
-            vim.api.nvim_buf_set_lines(content_buf, selected_line[1] - 1, selected_line[1], false, { str })
-          end
+        -- assistant message
+        if message.reasoning_content then
+          -- thinking content
+          local thinking_lines = vim.split(message.reasoning_content, "\n")
+          table.insert(thinking_lines, 1, "[!Tip] Thought content")
+          self:_write_lines_to_response(vim
+            .iter(thinking_lines)
+            :map(function(line)
+              return "> " .. line
+            end)
+            :totable())
+        else
+          -- answer content
+          local answer_lines = vim.split(message.content, "\n")
+          self:_write_lines_to_response(answer_lines)
         end
       end
     end
   end
+  vim.api.nvim_set_current_win(self.win.floats.input.winid)
 end
 
-function M.select_server()
-  if servers.input_buf then
+---stop request
+---@param signal llm.server.StopSignal
+function Chat:_stop(signal)
+  self.server:stop_request(signal)
+end
+
+function Chat:_render()
+  local status, module = pcall(require, "render-markdown")
+  if status then
+    module.buf_enable()
+  end
+end
+
+---@private
+---use <C-N> to create new chat
+function Chat:_register_new_chat_keymap()
+  local bufnrs = { self.win.floats.input.bufnr, self.win.floats.response.bufnr }
+  for _, bufnr in ipairs(bufnrs) do
+    vim.keymap.set({ "n", "i" }, "<C-N>", function()
+      self:new(SessionManager:new_session(ServerManager.chat_server.server, ServerManager.chat_server.model))
+    end, { buffer = bufnr, noremap = true, silent = true })
+  end
+end
+
+---@private
+---use <C-C> to stop request
+---use <C-S> to save session
+function Chat:_register_stop_and_save_keymap()
+  local bufnrs = { self.win.floats.input.bufnr, self.win.floats.response.bufnr }
+  for _, bufnr in ipairs(bufnrs) do
+    vim.keymap.set({ "n", "i" }, "<C-C>", function()
+      self:_stop(1000)
+      self:_remove_stop_request_keymap()
+    end, { buffer = bufnr, noremap = true, silent = true })
+    vim.keymap.set({ "n", "i" }, "<C-S>", function()
+      self.session:save()
+    end, { buffer = bufnr, noremap = true, silent = true })
+  end
+end
+
+---@private
+function Chat:_remove_stop_request_keymap()
+  local bufnrs = { self.win.floats.input.bufnr, self.win.floats.response.bufnr }
+  for _, bufnr in ipairs(bufnrs) do
+    pcall(vim.keymap.del, { "n", "i" }, "<C-C>", { buffer = bufnr })
+  end
+end
+
+---@private
+function Chat:_register_input_enter_keymap()
+  local function submit()
+    self:_remove_input_enter_keymap()
+    self:_input_enter_handler()
+  end
+  vim.keymap.set("n", "<CR>", submit, { buffer = self.win.floats.input.bufnr, noremap = true, silent = true })
+  -- <C-CR>
+  vim.keymap.set("i", "<NL>", submit, { buffer = self.win.floats.input.bufnr, noremap = true, silent = true })
+end
+
+---@private
+function Chat:_remove_input_enter_keymap()
+  pcall(vim.keymap.del, "n", "<CR>", { buffer = self.win.floats.input.bufnr, noremap = true, silent = true })
+  pcall(vim.keymap.del, "i", "<NL>", { buffer = self.win.floats.input.bufnr, noremap = true, silent = true })
+end
+
+---@private
+function Chat:_add_round_separator()
+  self:_write_lines_to_response { "", "**response ended!**" }
+end
+
+---@private
+function Chat:_add_long_time_separator()
+  self:_write_lines_to_response { "----" }
+end
+
+---@private
+function Chat:_refresh_response_cursor()
+  if vim.api.nvim_win_is_valid(self.win.floats.response.winid) then
+    local new_row, new_col = util.get_last_char_position(self.win.floats.response.bufnr)
+    vim.api.nvim_win_set_cursor(self.win.floats.response.winid, { new_row, new_col })
+  end
+end
+
+---@private
+---@param input_lines string[]
+---@return string[]
+function Chat:_build_input_render_style(input_lines)
+  local lines = vim.deepcopy(input_lines)
+  lines[1] = config.options.user_prompt .. " " .. lines[1]
+  return lines
+end
+
+---@private
+---@param head_line integer
+function Chat:_update_thinking_head(head_line)
+  vim.api.nvim_buf_set_lines(
+    self.win.floats.response.bufnr,
+    head_line,
+    head_line + 1,
+    false,
+    { "> [!Tip] Thought content" }
+  )
+end
+
+---@private
+---@param lines string[]
+---@param add_margin_bottom? boolean default true
+function Chat:_write_lines_to_response(lines, add_margin_bottom)
+  if
+    vim.api.nvim_buf_line_count(self.win.floats.response.bufnr) == 1
+    and vim.api.nvim_buf_get_lines(self.win.floats.response.bufnr, 0, 1, false)[1] == ""
+  then
+    vim.api.nvim_buf_set_lines(self.win.floats.response.bufnr, 0, -1, false, lines)
+  else
+    vim.api.nvim_buf_set_lines(self.win.floats.response.bufnr, -1, -1, false, lines)
+  end
+  if add_margin_bottom == nil or add_margin_bottom then
+    -- add empty line
+    vim.api.nvim_buf_set_lines(self.win.floats.response.bufnr, -1, -1, false, { "" })
+  end
+  self:_refresh_response_cursor()
+  hl.mark_sections(self.win.floats.response.bufnr)
+end
+
+---@private
+---@param content string
+---@param start_think {value: boolean, in_line: integer}
+function Chat:_write_reason_text_to_response(content, start_think)
+  local bufnr = self.win.floats.response.bufnr
+  local row, col = util.get_last_char_position(bufnr)
+  -- thinking content style
+  content = content:gsub("\n", "\n> ")
+  -- thinking head style
+  if start_think.value then
+    content = "\n> [!Tip] Thinking\n> " .. content
+    start_think.value = false
+    -- save thinking head line
+    start_think.in_line = row
+  end
+  local lines = vim.split(content, "\n")
+  vim.api.nvim_buf_set_text(bufnr, row - 1, col, row - 1, col, lines)
+  self:_refresh_response_cursor()
+end
+
+---@private
+---@param content string
+---@param start_answer {value: boolean}
+---@param start_think {value: boolean}
+function Chat:_write_answer_text_to_response(content, start_answer, start_think)
+  if start_answer.value then
+    -- new line
+    content = (start_think.value and "\n" or "\n\n") .. content
+    start_answer.value = false
+  end
+  local bufnr = self.win.floats.response.bufnr
+  local row, col = util.get_last_char_position(bufnr)
+  local lines = vim.split(content, "\n")
+  vim.api.nvim_buf_set_text(bufnr, row - 1, col, row - 1, col, lines)
+  self:_refresh_response_cursor()
+end
+
+---handle response(stream mode)
+---@private
+---@param res string
+---@param response_message llm.session.Message
+---@param response_reasoning_message llm.session.Message
+---@param start_think {value: boolean, in_line: integer}
+---@param start_answer {value: boolean}
+---@param parse_error fun(string)
+function Chat:_response_handler(
+  res,
+  response_message,
+  response_reasoning_message,
+  start_think,
+  start_answer,
+  parse_error
+)
+  if not res or res == "" then
     return
   end
-  servers.create_server_picker_win(
-    -- enter callback
-    function()
-      local opened_wins = { M.input_win, M.response_win, session.input_win, session.response_win }
-      for _, win_id in ipairs(opened_wins) do
-        if win_id and vim.api.nvim_win_is_valid(win_id) then
-          vim.api.nvim_win_close(win_id, true)
-        end
+
+  local chunk = res:match "^data:%s(.+)$"
+
+  -- not match normal response
+  if chunk == nil then
+    parse_error(res)
+    return
+  end
+
+  -- response end
+  if chunk == "[DONE]" then
+    return
+  end
+
+  -- trying to parse chunk
+  _, chunk = pcall(vim.json.decode, chunk)
+  if chunk == nil then
+    parse_error(string.format("parse error: %s", res))
+    return
+  end
+
+  -- handle chunk
+  if chunk.choices and chunk.choices[1] and chunk.choices[1].delta then
+    if chunk.choices[1].delta.reasoning_content and chunk.choices[1].delta.reasoning_content ~= vim.NIL then
+      -- update reasoning message
+      response_reasoning_message.role = chunk.choices[1].delta.role or response_reasoning_message.role
+      response_reasoning_message.reasoning_content = response_reasoning_message.reasoning_content
+        .. chunk.choices[1].delta.reasoning_content
+      -- write reasoning content to response buf
+      self:_write_reason_text_to_response(chunk.choices[1].delta.reasoning_content, start_think)
+    else
+      if start_think.in_line then
+        self:_update_thinking_head(start_think.in_line)
+        start_think.in_line = nil
       end
-    end,
-    -- close callback
-    nil
-  )
+      -- update response message
+      response_message.role = chunk.choices[1].delta.role or response_message.role
+      response_message.content = response_message.content .. chunk.choices[1].delta.content
+      -- write response content to response buf
+      self:_write_answer_text_to_response(chunk.choices[1].delta.content, start_answer, start_think)
+    end
+  end
 end
 
-return M
+---@private
+function Chat:_after_begin()
+  -- self:_add_request_separator()
+  self:_register_stop_and_save_keymap()
+  if vim.api.nvim_win_is_valid(self.win.floats.response.winid) then
+    vim.api.nvim_set_current_win(self.win.floats.response.winid)
+  end
+  if (os.difftime(os.time(), self.session.update_time)) > 60 * 60 then
+    self:_add_long_time_separator()
+  end
+end
+
+---@private
+function Chat:_after_stop()
+  self:_remove_stop_request_keymap()
+  self:_register_input_enter_keymap()
+end
+
+---@private
+function Chat:_input_enter_handler()
+  local input_lines = vim.api.nvim_buf_get_lines(self.win.floats.input.bufnr, 0, -1, false)
+  if input_lines[1] == "" then
+    return
+  end
+
+  -- construct response message and reasoning message
+  local response_message = { role = "assistant", content = "" }
+  local response_reasoning_message = { role = "assistant", reasoning_content = "" }
+
+  -- start response sign
+  local start_think = { value = true }
+  local start_answer = { value = true }
+
+  ---@param error llm.server.Error
+  local function on_error(error)
+    local header = "[!CAUTION] Error!"
+    if error.exit == 1000 or error.exit == 1001 then
+      header = "[!WARNING] Warning!"
+    end
+    local err = string.format("%s%s%s", header, "\n", error.message)
+    local err_lines = vim.split(err, "\n")
+    err_lines = vim
+      .iter(err_lines)
+      :map(function(line)
+        return "> " .. line
+      end)
+      :totable()
+    table.insert(err_lines, 1, "")
+    self:_write_lines_to_response(err_lines)
+    self:_after_stop()
+  end
+
+  ---@param error string
+  local function parse_error(error)
+    ---@type llm.server.Error
+    local err_obj = {
+      exit = 1002,
+      message = error,
+      stderr = "",
+    }
+    if error:match "^{.*}$" then
+      local status, msg = pcall(vim.json.decode, error)
+      if status then
+        msg = msg.error and (msg.error.message or msg.error) or msg
+        err_obj.message = type(msg) == "string" and msg or vim.inspect(msg)
+      end
+    end
+    on_error(err_obj)
+  end
+
+  ---on stream response
+  ---@param err string
+  ---@param data string
+  local function on_stream(err, data)
+    -- handle error
+    if err then
+      on_error { message = err, stderr = "", exit = 0 }
+    -- handle response data
+    else
+      self:_response_handler(data, response_message, response_reasoning_message, start_think, start_answer, parse_error)
+    end
+  end
+
+  local function on_exit()
+    -- add reasoning message to session
+    if response_reasoning_message.reasoning_content ~= "" then
+      self.session:add_message(response_reasoning_message)
+    end
+    -- add response message to session
+    if response_message.content ~= "" then
+      self.session:add_message(response_message)
+    end
+    self:_after_stop()
+    self:_add_round_separator()
+  end
+
+  ---construct input message
+  ---@type llm.session.Message
+  local input_message = { role = self.server.user_role or "user", content = table.concat(input_lines, "\n") }
+  -- construct send content
+  ---@type llm.session.Message[]
+  local send_content = { input_message }
+  if self.server.multi_round then
+    send_content = self.session:multi_round_filter()
+    table.insert(send_content, input_message)
+  end
+
+  -- send request,force stream mode
+  self.server:request(send_content, { stream = true }, nil, on_exit, on_stream, on_error)
+
+  self:_after_begin()
+
+  -- add input to session
+  self.session:add_message(input_message)
+  -- clear input
+  vim.api.nvim_buf_set_lines(self.win.floats.input.bufnr, 0, -1, false, {})
+  -- write input to response buf
+  self:_write_lines_to_response(self:_build_input_render_style(input_lines))
+end
+
+return Chat

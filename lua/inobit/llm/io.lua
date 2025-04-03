@@ -1,3 +1,4 @@
+---@diagnostic disable: redefined-local
 local log = require "inobit.llm.log"
 local Path = require "plenary.path"
 local Job = require "plenary.job"
@@ -5,31 +6,6 @@ local uv = vim.uv or vim.loop
 local default_mod = 438 --0666
 
 local M = {}
-
-function M.handle_exit_code(code)
-  local msg
-  if not code then
-    msg = "Something went wrong."
-  end
-  if code == 0 then
-    msg = "Request succeeded!"
-  elseif code == 1 then
-    msg = "Unsupported protocol or malformed URL."
-  elseif code == 6 then
-    msg = "Could not resolve host."
-  elseif code == 7 then
-    msg = "Failed to connect to host."
-  elseif code == 22 then
-    msg = "HTTP error (e.g., 404 Not Found, 401 Unauthorized)."
-  elseif code == 28 then
-    msg = "Request timed out."
-  else
-    msg = "Request failed with unknown exit code: " .. code
-  end
-  if code ~= 0 then
-    vim.notify(msg, vim.log.levels.ERROR)
-  end
-end
 
 function M.stream_curl(args, handle_prev, handle_response, handle_post)
   local active_job = Job:new {

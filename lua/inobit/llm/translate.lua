@@ -1,12 +1,19 @@
 local M = {}
 
-local servers = require "inobit.llm.servers"
+local ServerManager = require "inobit.llm.server"
 local util = require "inobit.llm.util"
-local curl = require "plenary.curl"
 local notify = require "inobit.llm.notify"
 local win = require "inobit.llm.win"
 
--- translate
+---@class llm.translate.PromptOptions
+---@field output_type string
+---@field source_lang string
+---@field target_lang string
+---@field text string
+
+---build translation prompt
+---@param params llm.translate.PromptOptions
+---@return llm.session.Message[]
 local function build_translation_prompt(params)
   local system_prompt = [[
     As a professional language processing engine, perform precise text translation tasks. please accurately convert the source language content to the target language. translation requirements: 
@@ -21,10 +28,12 @@ local function build_translation_prompt(params)
 
   return {
     { role = "system", content = system_prompt },
-    { role = servers.get_server_selected().user_role, content = content },
+    { role = ServerManager.translate_server.user_role or "user", content = content },
   }
 end
 
+---@param text string
+---@return llm.session.Message[]
 local function translate_en_to_zh(text)
   return build_translation_prompt {
     output_type = "plain text",
@@ -34,6 +43,8 @@ local function translate_en_to_zh(text)
   }
 end
 
+---@param text string
+---@return llm.session.Message[]
 local function translate_zh_to_en_text(text)
   return build_translation_prompt {
     output_type = "plain text, use natural language, first letter lowercase",
@@ -43,6 +54,8 @@ local function translate_zh_to_en_text(text)
   }
 end
 
+---@param text string
+---@return llm.session.Message[]
 local function translate_zh_to_en_var_camel(text)
   return build_translation_prompt {
     output_type = "variables in camel case, if the variables character count is greater than 20, then perform reasonable abbreviation.",
@@ -52,6 +65,8 @@ local function translate_zh_to_en_var_camel(text)
   }
 end
 
+---@param text string
+---@return llm.session.Message[]
 local function translate_zh_to_en_var_underline(text)
   return build_translation_prompt {
     output_type = "variables in underscore naming convention, if the variables character count is greater than 20, then perform reasonable abbreviation.",
@@ -65,6 +80,8 @@ end
 
 local types = { "E2Z", "Z2E", "Z2E_CAMEL", "Z2E_UNDERLINE" }
 
+---@param type translate_type
+---@return translate_type | nil
 function M.is_valid_type(type)
   return vim.iter(types):find(type)
 end
@@ -84,12 +101,6 @@ function M.translate(type, text, callback)
     return
   end
 
-  -- check server
-  local check = servers.check_options(servers.get_server_selected().server)
-  if not check then
-    return
-  end
-
   local messages = nil
   if type == "E2Z" then
     messages = translate_en_to_zh(text)
@@ -100,18 +111,19 @@ function M.translate(type, text, callback)
   elseif type == "Z2E_UNDERLINE" then
     messages = translate_zh_to_en_var_underline(text)
   end
-  local url, opts = servers.get_server_selected().build_curl_request(messages, { stream = false })
-  opts.callback = function(res)
-    if res.status == 200 then
-      local body = vim.json.decode(res.body)
-      callback(body.choices[1].message.content)
-    else
-      vim.schedule(function()
+  if messages then
+    local exit_callback = function(res)
+      if res.status == 200 then
+        local body = vim.json.decode(res.body)
+        callback(body.choices[1].message.content)
+        notify.info "Translation completed."
+      else
         notify.error(string.format("Translate %s error: %s", res.status, res.body))
-      end)
+      end
     end
+    ServerManager.translate_server:request(messages, { stream = false }, nil, exit_callback)
+    notify.info "Translating..."
   end
-  curl.post(url, opts) -- async when stream or callback is exsit
 end
 
 ---@param content string
@@ -119,25 +131,31 @@ local function print_callback(content)
   -- write to "t" register
   -- vim.fn.setreg("t", content)
 
-  -- create floating window
   local width = math.floor(vim.o.columns * 0.5)
   local height = math.floor(vim.o.lines * 0.2)
-  local left = (vim.o.columns - width) / 2
-  local top = (vim.o.lines - height) / 2
-  ---@diagnostic disable-next-line: unused-local
-  local bufnr, winid = win.create_floating_window(width, height, top, left, 0, "translate result")
+
+  ---@type llm.win.WinConfig
+  local opts = {
+    width = width,
+    height = height,
+    row = (vim.o.lines - height) / 2,
+    col = (vim.o.columns - width) / 2,
+    title = "translate result",
+  }
+
+  local floating = win.FloatingWin:new(opts)
 
   -- register autocmd to clean
   vim.api.nvim_create_autocmd("WinClosed", {
-    buffer = bufnr,
+    buffer = floating.bufnr,
     callback = function()
       -- pcall(vim.api.nvim_win_close, winid, true)
-      pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+      pcall(vim.api.nvim_buf_delete, floating.bufnr, { force = true })
     end,
   })
 
   -- display content
-  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, vim.iter(vim.gsplit(content, "\n")):totable())
+  vim.api.nvim_buf_set_lines(floating.bufnr, 0, -1, false, vim.iter(vim.gsplit(content, "\n")):totable())
 end
 
 ---@param replace boolean

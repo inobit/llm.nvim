@@ -2,151 +2,206 @@ local M = {}
 local config = require "inobit.llm.config"
 local util = require "inobit.llm.util"
 
---TODO: refactor through metatable/prototype
+---@class llm.win.WinStack
+M.WinStack = {}
 
--- floating windows from-stack
-local floating_win_stack = {}
+---@type table<integer, integer>
+M.WinStack.stack = {}
 
-function M.create_floating_window(width, height, row, col, winblend, title)
-  local bufnr = vim.api.nvim_create_buf(false, true)
-  local win_id = vim.api.nvim_open_win(bufnr, true, {
+---@param winid integer
+---@param from_winid integer
+function M.WinStack:push(winid, from_winid)
+  self.stack[winid] = from_winid
+end
+
+---@param winid integer
+function M.WinStack:delete(winid)
+  self.stack[winid] = nil
+end
+
+---@param winid integer
+function M.WinStack:pop(winid)
+  if self.stack[winid] and vim.api.nvim_win_is_valid(self.stack[winid]) then
+    vim.api.nvim_set_current_win(self.stack[winid])
+    self:delete(winid)
+  end
+end
+
+---@class llm.win.WinConfig: vim.api.keyset.win_config
+---@field winblend? integer
+---@field bufnr? integer
+
+---@class llm.win.FloatingWin
+---@field bufnr integer
+---@field winid integer
+M.FloatingWin = {}
+M.FloatingWin.__index = M.FloatingWin
+
+function M.FloatingWin:register_content_change()
+  vim.api.nvim_buf_attach(self.bufnr, false, {
+    on_lines = util.debounce(100, function()
+      if vim.api.nvim_win_is_valid(self.winid) then
+        local lines = vim.api.nvim_buf_line_count(self.bufnr)
+        if lines == 0 then
+          vim.api.nvim_set_option_value("cursorline", false, { win = self.winid })
+        elseif lines == 1 and vim.api.nvim_buf_get_lines(self.bufnr, 0, 1, true)[1] == "" then
+          vim.api.nvim_set_option_value("cursorline", false, { win = self.winid })
+        else
+          vim.api.nvim_set_option_value("cursorline", true, { win = self.winid })
+        end
+      end
+    end),
+  })
+end
+
+function M.FloatingWin:close()
+  pcall(vim.api.nvim_win_close, self.winid, true)
+end
+
+---@param opts llm.win.WinConfig
+---@return llm.win.FloatingWin
+function M.FloatingWin:new(opts)
+  ---@type llm.win.FloatingWin
+  ---@diagnostic disable-next-line: missing-fields
+  local this = {}
+  local bufnr = opts.bufnr or vim.api.nvim_create_buf(false, true)
+  local winid = vim.api.nvim_open_win(bufnr, false, {
     relative = "editor",
-    width = width,
-    height = height,
-    row = row,
-    col = col,
+    width = opts.width,
+    height = opts.height,
+    row = opts.row,
+    col = opts.col,
     style = "minimal",
     border = "rounded",
-    title = title,
+    title = opts.title,
     title_pos = "center",
     focusable = true,
   })
-  vim.api.nvim_set_option_value("winblend", winblend, { win = win_id })
-  -- vim.cmd(
-  --   string.format(
-  --     "autocmd WinClosed <buffer> silent! execute 'bdelete! %s'",
-  --     bufnr
-  --   )
-  -- )
-  return bufnr, win_id
+  if opts.winblend then
+    vim.api.nvim_set_option_value("winblend", opts.winblend, { win = winid })
+  end
+  this.bufnr = bufnr
+  this.winid = winid
+  return setmetatable(this, M.FloatingWin)
 end
 
-local function get_next_float(wins)
-  local cur_win = vim.api.nvim_get_current_win()
-  local it = vim.iter(wins)
-  it:find(cur_win)
-  return it:next() or wins[1]
-end
-
-local function get_prev_float(wins)
-  local cur_win = vim.api.nvim_get_current_win()
-  local iter = vim.iter(wins)
-  local prev_win = nil
-  for win in iter do
-    if win == cur_win then
-      return prev_win or wins[#wins]
-    end
-    prev_win = win
+---@param wins_id string
+---@param wins llm.win.FloatingWin[]
+---@param delete_buffer? boolean
+---@param close_prev_handler? fun()
+---@param close_post_handler? fun()
+local function register_close_for_wins(wins_id, wins, delete_buffer, close_prev_handler, close_post_handler)
+  vim.api.nvim_create_augroup(wins_id .. "close", { clear = false })
+  for _, win in ipairs(wins) do
+    vim.api.nvim_create_autocmd("WinClosed", {
+      group = wins_id .. "close",
+      buffer = win.bufnr,
+      callback = function(args)
+        if close_prev_handler and win.bufnr == args.buf then
+          close_prev_handler()
+        end
+        for _, other_win in ipairs(wins) do
+          M.WinStack:pop(other_win.winid)
+          if delete_buffer then
+            pcall(vim.api.nvim_buf_delete, other_win.bufnr, { force = true })
+          end
+          pcall(vim.api.nvim_win_close, other_win.winid, true)
+        end
+        pcall(vim.api.nvim_del_augroup_by_name, wins_id .. "close")
+        pcall(vim.api.nvim_del_augroup_by_name, wins_id .. "AutoSkipWhenInsert")
+        if close_post_handler and win.bufnr == args.buf then
+          close_post_handler()
+        end
+      end,
+    })
   end
 end
 
-local function set_vertical_navigate_keymap(up_lhs, down_lhs, buffers, wins)
-  for _, buffer in ipairs(buffers) do
-    vim.keymap.set("n", up_lhs, function()
-      vim.api.nvim_set_current_win(get_prev_float(wins))
-    end, { buffer = buffer, noremap = true, silent = true })
-
-    vim.keymap.set("n", down_lhs, function()
-      vim.api.nvim_set_current_win(get_next_float(wins))
-    end, { buffer = buffer, noremap = true, silent = true })
-  end
-end
-
-local function register_auto_skip_when_insert(source_buf, target_win)
-  vim.api.nvim_create_augroup("AutoSkipWhenInsert", { clear = true })
+---@param wins_id string
+---@param source_bufnr integer
+---@param target_winid integer
+local function register_auto_skip_when_insert(wins_id, source_bufnr, target_winid)
+  vim.api.nvim_create_augroup(wins_id .. "AutoSkipWhenInsert", { clear = true })
   vim.api.nvim_create_autocmd("InsertEnter", {
-    group = "AutoSkipWhenInsert",
-    buffer = source_buf,
+    group = wins_id .. "AutoSkipWhenInsert",
+    buffer = source_bufnr,
     callback = function()
-      if target_win then
-        vim.api.nvim_set_current_win(target_win)
+      if target_winid then
+        vim.api.nvim_set_current_win(target_winid)
         vim.api.nvim_input "<Esc>"
       end
     end,
   })
 end
 
-function M.disable_auto_skip_when_insert()
-  pcall(vim.api.nvim_del_augroup_by_name, "AutoSkipWhenInsert")
-end
-
-local function pop_win_stack(win)
-  if floating_win_stack[win] then
-    vim.api.nvim_set_current_win(
-      vim.api.nvim_win_is_valid(floating_win_stack[win]) and floating_win_stack[win] or vim.api.nvim_list_wins()[1]
-    )
-    floating_win_stack[win] = nil
+---@param wins llm.win.FloatingWin[]
+local function register_vertical_navigate_keymap(wins)
+  ---@return llm.win.FloatingWin
+  local function next_win()
+    local cur_win = vim.api.nvim_get_current_win()
+    local it = vim.iter(wins)
+    it:find(function(win)
+      return win.winid == cur_win
+    end)
+    return it:next() or wins[1]
+  end
+  for _, win in ipairs(wins) do
+    -- switch window
+    vim.keymap.set("n", "<Tab>", function()
+      vim.api.nvim_set_current_win(next_win().winid)
+    end, { buffer = win.bufnr, noremap = true, silent = true })
   end
 end
 
-local function delete_buf_in_win(win_id)
-  local bufnr = vim.api.nvim_win_get_buf(win_id)
-  pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+---@alias llm.win.chatWin.FloatsKind
+---| "input"
+---| "response"
+
+---@class llm.win.ChatWinOptions
+---@field title string
+---@field input_bufnr? integer use existing bufnr
+---@field response_bufnr? integer
+---@field close_prev_handler? fun()
+---@field close_post_handler? fun()
+
+---@class llm.win.ChatWin
+---@field title string
+---@field id string
+---@field floats table<llm.win.chatWin.FloatsKind, llm.win.FloatingWin>
+M.ChatWin = {}
+M.ChatWin.__index = M.ChatWin
+M.ChatWin._zindex = 1000
+
+---@private
+function M.ChatWin:_zindex_increment()
+  self._zindex = self._zindex + 1
 end
 
-local function register_close_for_wins(wins, group_prefix, close_post, close_prev)
-  vim.api.nvim_create_augroup(group_prefix .. "AutoCloseWins", { clear = true })
-  vim.api.nvim_create_autocmd("WinClosed", {
-    group = group_prefix .. "AutoCloseWins",
-    callback = function(args)
-      local win = tonumber(args.match)
-      if vim.tbl_contains(wins, win) then
-        if close_prev then
-          close_prev()
-        end
-        for _, other_win in ipairs(wins) do
-          pop_win_stack(other_win)
-          delete_buf_in_win(other_win)
-          if other_win ~= win and vim.api.nvim_win_is_valid(other_win) then
-            vim.api.nvim_win_close(other_win, true)
-          end
-        end
-        pcall(vim.api.nvim_del_augroup_by_name, group_prefix .. "AutoCloseWins")
-        if close_post then
-          close_post()
-        end
-      end
-    end,
-  })
+---@private
+---@param close_prev_handler? fun()
+---@param close_post_handler? fun()
+function M.ChatWin:_register_close_chat_win(close_prev_handler, close_post_handler)
+  register_close_for_wins(self.id, vim.tbl_values(self.floats), false, close_prev_handler, close_post_handler)
 end
 
-local function register_content_change(bufnr, win_id)
-  vim.api.nvim_buf_attach(bufnr, false, {
-    on_lines = util.debounce(100, function()
-      local lines = vim.api.nvim_buf_line_count(bufnr)
-      if lines == 0 then
-        vim.api.nvim_set_option_value("cursorline", false, { win = win_id })
-      elseif lines == 1 and vim.api.nvim_buf_get_lines(bufnr, 0, 1, true)[1] == "" then
-        vim.api.nvim_set_option_value("cursorline", false, { win = win_id })
-      else
-        vim.api.nvim_set_option_value("cursorline", true, { win = win_id })
-      end
-    end),
-  })
+---@private
+function M.ChatWin:_register_auto_skip_when_insert()
+  register_auto_skip_when_insert(self.id, self.floats.response.bufnr, self.floats.input.winid)
 end
 
-local function disable_input_enter_key(bufnr)
-  vim.keymap.del("n", "<CR>", { buffer = bufnr, noremap = true, silent = true })
+---@private
+function M.ChatWin:_register_vertical_navigate_keymap()
+  register_vertical_navigate_keymap(vim.tbl_values(self.floats))
 end
 
-local function register_input_enter_handler(bufnr, enter_handler)
-  vim.keymap.set("n", "<CR>", function()
-    disable_input_enter_key(bufnr)
-    enter_handler()
-  end, { buffer = bufnr, noremap = true, silent = true })
-end
+---@param opts llm.win.ChatWinOptions
+---@return llm.win.ChatWin
+function M.ChatWin:new(opts)
+  ---@type llm.win.ChatWin
+  ---@diagnostic disable-next-line: missing-fields
+  local this = { title = opts.title, id = util.uuid() }
+  setmetatable(this, M.ChatWin)
 
-function M.create_chat_win(server, enter_handler, close_prev, close_post)
   -- record where from
   local cur_win = vim.api.nvim_get_current_win()
 
@@ -154,7 +209,7 @@ function M.create_chat_win(server, enter_handler, close_prev, close_post)
 
   local width = math.floor(vim.o.columns * chat_win.width_percentage)
 
-  local response_height = math.floor(vim.o.lines * chat_win.response_height_percentage)
+  local response_height = math.floor(vim.o.lines * chat_win.content_height_percentage)
 
   local input_height = math.floor(vim.o.lines * chat_win.input_height_percentage)
 
@@ -163,149 +218,227 @@ function M.create_chat_win(server, enter_handler, close_prev, close_post)
   local input_top = (vim.o.lines - response_height - input_height) / 2 + response_height + 2
 
   local left = (vim.o.columns - width) / 2
-  local response_buf, response_win =
-    M.create_floating_window(width, response_height, response_top, left, chat_win.winblend, server)
 
-  local input_buf, input_win =
-    M.create_floating_window(width, input_height, input_top, left, chat_win.winblend, "input")
+  ---@type llm.win.WinConfig
+  local response_opts = {
+    width = width,
+    height = response_height,
+    row = response_top,
+    col = left,
+    winblend = chat_win.winblend,
+    title = opts.title,
+    bufnr = opts.response_bufnr,
+    zindex = M.ChatWin._zindex,
+  }
+
+  ---@type llm.win.WinConfig
+  local input_opts = {
+    width = width,
+    height = input_height,
+    row = input_top,
+    col = left,
+    winblend = chat_win.winblend,
+    title = "input",
+    bufnr = opts.input_bufnr,
+    zindex = M.ChatWin._zindex,
+  }
+
+  local response_win = M.FloatingWin:new(response_opts)
+
+  local input_win = M.FloatingWin:new(input_opts)
+
+  M.ChatWin:_zindex_increment()
+
+  this.floats = { response = response_win, input = input_win }
 
   -- set filetype
-  vim.api.nvim_set_option_value("filetype", vim.g.inobit_filetype, { buf = input_buf })
-  vim.api.nvim_set_option_value("filetype", vim.g.inobit_filetype, { buf = response_buf })
+  -- vim.api.nvim_set_option_value("readonly", true, { buf = response_win.bufnr })
+  vim.api.nvim_set_option_value("filetype", vim.g.inobit_filetype, { buf = input_win.bufnr })
+  vim.api.nvim_set_option_value("filetype", vim.g.inobit_filetype, { buf = response_win.bufnr })
 
   -- push win stack
-  floating_win_stack[input_win] = cur_win
-  floating_win_stack[response_win] = cur_win
+  M.WinStack:push(input_win.winid, cur_win)
+  M.WinStack:push(response_win.winid, cur_win)
 
-  vim.api.nvim_set_current_win(input_win)
+  vim.api.nvim_set_current_win(input_win.winid)
 
-  set_vertical_navigate_keymap(
-    config.options.win_cursor_move_mappings.up,
-    config.options.win_cursor_move_mappings.down,
-    -- The order is the layout order.
-    { response_buf, input_buf },
-    { response_win, input_win }
-  )
+  response_win:register_content_change()
 
-  register_content_change(response_buf, response_win)
-  register_auto_skip_when_insert(response_buf, input_win)
-  register_close_for_wins({ input_win, response_win }, server, close_post, close_prev)
-  register_input_enter_handler(input_buf, enter_handler)
+  -- register events
+  this:_register_vertical_navigate_keymap()
+  this:_register_auto_skip_when_insert()
+  this:_register_close_chat_win(opts.close_prev_handler, opts.close_post_handler)
 
-  return response_buf,
-    response_win,
-    input_buf,
-    input_win,
-    function()
-      register_input_enter_handler(input_buf, enter_handler)
-    end
+  return this
 end
 
-local function register_picker_line_move(input_buf, content_buf, content_win)
+---@alias llm.win.pickerWin.FloatsKind
+---| "input"
+---| "content"
+
+---@class llm.win.PickerWinOptions
+---@field title string
+---@field winOptions llm.WinOptions
+---@field data_filter_wraper? fun(): fun(input: string): string[]
+---@field enter_handler? fun(selected: string)
+---@field close_prev_handler? fun()
+---@field close_post_handler? fun()
+
+---@class llm.win.PickerWin
+---@field title string
+---@field id string
+---@field floats table<llm.win.pickerWin.FloatsKind, llm.win.FloatingWin>
+---@field refresh_data fun()
+M.PickerWin = {}
+M.PickerWin.__index = M.PickerWin
+
+function M.PickerWin:_register_picker_line_move()
   vim.keymap.set("n", "j", function()
-    local lines = vim.api.nvim_buf_line_count(content_buf)
-    local cur_line = vim.api.nvim_win_get_cursor(content_win)
+    local lines = vim.api.nvim_buf_line_count(self.floats.content.bufnr)
+    local cur_line = vim.api.nvim_win_get_cursor(self.floats.content.winid)
     local next_line = nil
     if cur_line[1] + 1 > lines then
       next_line = 1
     else
       next_line = cur_line[1] + 1
     end
-    vim.api.nvim_win_set_cursor(content_win, { next_line, 0 })
-  end, { buffer = input_buf })
+    vim.api.nvim_win_set_cursor(self.floats.content.winid, { next_line, 0 })
+  end, { buffer = self.floats.input.bufnr })
 
   vim.keymap.set("n", "k", function()
-    local lines = vim.api.nvim_buf_line_count(content_buf)
-    local cur_line = vim.api.nvim_win_get_cursor(content_win)
+    local lines = vim.api.nvim_buf_line_count(self.floats.content.bufnr)
+    local cur_line = vim.api.nvim_win_get_cursor(self.floats.content.winid)
     local next_line = nil
     if cur_line[1] - 1 == 0 then
       next_line = lines
     else
       next_line = cur_line[1] - 1
     end
-    vim.api.nvim_win_set_cursor(content_win, { next_line, 0 })
-  end, { buffer = input_buf })
+    vim.api.nvim_win_set_cursor(self.floats.content.winid, { next_line, 0 })
+  end, { buffer = self.floats.input.bufnr })
 end
 
-local function register_picker_data_filter(bufnr, filter_handler)
-  vim.api.nvim_buf_attach(bufnr, false, {
+---@private
+---@param close_prev_handler fun()
+---@param close_post_handler fun()
+function M.PickerWin:_register_close_picker_win(close_prev_handler, close_post_handler)
+  register_close_for_wins(self.id, vim.tbl_values(self.floats), true, close_prev_handler, close_post_handler)
+end
+
+---@private
+---@param filter_handler fun(string)
+function M.PickerWin:_register_picker_data_filter(filter_handler)
+  vim.api.nvim_buf_attach(self.floats.input.bufnr, false, {
     on_lines = util.debounce(100, function(_, _, _, first)
-      filter_handler(vim.api.nvim_buf_get_lines(bufnr, first, -1, false)[1])
+      filter_handler(vim.api.nvim_buf_get_lines(self.floats.input.bufnr, first, -1, false)[1])
     end),
   })
 end
 
-local function register_picker_enter(input_buf, enter_handler)
+---@private
+---@param enter_handler fun()
+function M.PickerWin:_register_picker_enter(enter_handler)
   vim.keymap.set("n", "<CR>", function()
     enter_handler()
-  end, { buffer = input_buf })
+  end, { buffer = self.floats.input.bufnr })
 end
 
-function M.create_select_picker(
-  width_percentage,
-  input_height,
-  content_height_percentage,
-  winblend,
-  title,
-  data_filter_wraper,
-  enter_handler,
-  close_post
-)
+---@param opts llm.win.PickerWinOptions
+---@return llm.win.PickerWin
+function M.PickerWin:new(opts)
+  ---@type llm.win.PickerWin
+  ---@diagnostic disable-next-line: missing-fields
+  local this = { title = opts.title, id = util.uuid() }
+  this = setmetatable(this, M.PickerWin)
   -- record where from
   local cur_win = vim.api.nvim_get_current_win()
 
-  local width = math.floor(vim.o.columns * width_percentage)
+  opts.winOptions.input_height = opts.winOptions.input_height or 1
 
-  local content_height = math.floor(vim.o.lines * content_height_percentage)
+  local width = math.floor(vim.o.columns * opts.winOptions.width_percentage)
 
-  local input_top = (vim.o.lines - input_height - content_height) / 2
+  local content_height = math.floor(vim.o.lines * opts.winOptions.content_height_percentage)
 
-  local content_top = (vim.o.lines - input_height - content_height) / 2 + input_height + 2
+  local input_top = (vim.o.lines - opts.winOptions.input_height - content_height) / 2
+
+  local content_top = (vim.o.lines - opts.winOptions.input_height - content_height) / 2
+    + opts.winOptions.input_height
+    + 2
 
   local left = (vim.o.columns - width) / 2
 
-  local input_buf, input_win = M.create_floating_window(width, input_height, input_top, left, winblend, "filter")
+  ---@type llm.win.WinConfig
+  local input_opts = {
+    width = width,
+    height = opts.winOptions.input_height,
+    row = input_top,
+    col = left,
+    winblend = opts.winOptions.winblend,
+    title = "input",
+  }
 
-  local content_buf, content_win = M.create_floating_window(width, content_height, content_top, left, winblend, title)
+  ---@type llm.win.WinConfig
+  local content_opts = {
+    width = width,
+    height = content_height,
+    row = content_top,
+    col = left,
+    winblend = opts.winOptions.winblend,
+    title = opts.title,
+  }
+
+  local input_win = M.FloatingWin:new(input_opts)
+
+  local content_win = M.FloatingWin:new(content_opts)
+
+  this.floats = { input = input_win, content = content_win }
 
   -- set filetype
-  vim.api.nvim_set_option_value("filetype", vim.g.inobit_filetype, { buf = input_buf })
-  vim.api.nvim_set_option_value("filetype", vim.g.inobit_filetype, { buf = content_buf })
+  vim.api.nvim_set_option_value("filetype", vim.g.inobit_filetype, { buf = input_win.bufnr })
+  vim.api.nvim_set_option_value("filetype", vim.g.inobit_filetype, { buf = content_win.bufnr })
 
   -- push win stack
-  floating_win_stack[input_win] = cur_win
-  floating_win_stack[content_win] = cur_win
+  M.WinStack:push(input_win.winid, cur_win)
+  M.WinStack:push(content_win.winid, cur_win)
 
-  vim.api.nvim_set_option_value("wrap", false, { win = content_win })
-  vim.api.nvim_set_current_win(input_win)
+  vim.api.nvim_set_option_value("wrap", false, { win = content_win.winid })
+  vim.api.nvim_set_current_win(input_win.winid)
 
-  -- load data
-  local data_filter = data_filter_wraper()
+  content_win:register_content_change()
+  this:_register_close_picker_win(opts.close_prev_handler, opts.close_post_handler)
+  this:_register_picker_line_move()
 
-  register_close_for_wins({ input_win, content_win }, title, close_post)
-  register_picker_line_move(input_buf, content_buf, content_win)
-  register_content_change(content_buf, content_win)
-
-  local filter_handler = function(input)
-    vim.api.nvim_buf_set_lines(content_buf, 0, -1, false, data_filter(input))
+  --HACK: isn't normal way to do this
+  local _fn = {}
+  local filter_handler = setmetatable({}, _fn)
+  -- for external data refresh
+  function this.refresh_data()
+    local data_filter = opts.data_filter_wraper()
+    _fn.__call = function(_, input)
+      vim.api.nvim_buf_set_lines(content_win.bufnr, 0, -1, false, data_filter(input))
+    end
+    -- manual trigger
+    filter_handler(vim.api.nvim_buf_get_lines(input_win.bufnr, 0, -1, false)[1])
   end
-  register_picker_data_filter(input_buf, filter_handler)
-  -- manual trigger
-  filter_handler ""
+  this.refresh_data()
+  ---@diagnostic disable-next-line: param-type-mismatch
+  this:_register_picker_data_filter(filter_handler)
 
-  register_picker_enter(input_buf, function()
-    local lines = vim.api.nvim_buf_get_lines(
-      content_buf,
-      vim.api.nvim_win_get_cursor(content_win)[1] - 1,
-      vim.api.nvim_win_get_cursor(content_win)[1],
-      false
-    )
-    if lines and lines[1] and lines[1] ~= "" then
-      enter_handler(lines[1], input_win, content_win)
+  this:_register_picker_enter(function()
+    local line = util.get_current_line(content_win.bufnr, content_win.winid)
+    if line then
+      if opts.enter_handler then
+        opts.enter_handler(line)
+      end
+      -- the return is not via stack at this time, it should be deleted in advance to avoid being triggered by the winclosed event.
+      M.WinStack:delete(input_win.winid)
+      M.WinStack:delete(content_win.winid)
+      input_win:close()
+      content_win:close()
     end
   end)
 
-  return input_buf, input_win, content_buf, content_win
+  return this
 end
 
 return M
