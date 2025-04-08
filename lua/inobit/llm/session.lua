@@ -67,6 +67,8 @@ function SessionIndex:delete()
   if io.file_is_exist(path) then
     io.rm_file(path)
   end
+  SessionManager.session_list[self.id] = nil
+  SessionManager:_save()
   notify.info("session deleted.", string.format("session %s deleted.", self.name))
 end
 
@@ -112,6 +114,10 @@ end
 
 --- save current session and session index
 function Session:save()
+  if #self.content == 0 then
+    notify.warn("empty session does not need to be saved.", string.format("session %s is empty.", self.id))
+    return
+  end
   io.write_json(self:get_file_path(), { id = self.id, content = self.content })
   if self.name == self.id then
     self:_generate_session_name()
@@ -132,25 +138,15 @@ function SessionManager:get_file_path(id)
   return Path:new(config.get_session_dir(), id .. ".json").filename
 end
 
----delete empty session(usually create by CTRL-N)
----@private
-function SessionManager:_delete_empty_session()
-  for id, session in pairs(self.session_list) do
-    if
-      getmetatable(session) == Session and #session--[[@as llm.Session]].content == 0
-    then
-      self.session_list[id] = nil
-    end
-  end
-end
-
 ---@private
 function SessionManager:_save()
-  self:_delete_empty_session()
   local list = vim.tbl_map(function(item)
     if getmetatable(item) == SessionIndex then
       return item
-    elseif getmetatable(item) == Session then
+    elseif
+      -- only save session with content
+      getmetatable(item) == Session and #item--[[@as llm.Session]].content > 0
+    then
       return SessionIndex.toIndex(item)
     end
   end, self.session_list)

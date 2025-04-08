@@ -363,6 +363,8 @@ function Chat:_response_handler(
   end
 end
 
+function Chat:_spinner() end
+
 ---@private
 function Chat:_after_begin()
   -- self:_add_request_separator()
