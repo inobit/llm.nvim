@@ -87,6 +87,7 @@ function Server:_build_original_curl_args(input, params)
     model = self.model,
     messages = input,
     stream = self.stream,
+    temperature = self.temperature or 0.6,
   }, params or {})
 
   local args = {
