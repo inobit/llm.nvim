@@ -114,6 +114,7 @@ function Server:_build_curl_opts(input, server_params, curl_args)
     model = self.model,
     messages = input,
     stream = self.stream,
+    temperature = self.temperature or 0.6,
   }, server_params or {})
   local headers = {
     content_type = "application/json",

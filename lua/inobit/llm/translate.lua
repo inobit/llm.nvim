@@ -121,7 +121,7 @@ function M.translate(type, text, callback)
         notify.error(string.format("Translate %s error: %s", res.status, res.body))
       end
     end
-    ServerManager.translate_server:request(messages, { stream = false }, nil, exit_callback)
+    ServerManager.translate_server:request(messages, { stream = false, temperature = 1.3 }, nil, exit_callback)
     notify.info "Translating..."
   end
 end

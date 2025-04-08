@@ -6,6 +6,7 @@ local Path = require "plenary.path"
 ---@field stream? boolean
 ---@field multi_round? boolean
 ---@field user_role? string
+---@field temperature? number
 
 ---@class llm.server.CommonOptions: llm.server.BaseOptions
 ---@field base_url string
@@ -56,6 +57,7 @@ local function default_servers()
       api_key_name = "DEEPSEEK_API_KEY",
       stream = true,
       multi_round = true,
+      temperature = 0.6,
       user_role = "user",
       models = { "deepseek-chat", "deepseek-reasoner" },
     },
@@ -65,6 +67,7 @@ local function default_servers()
       api_key_name = "SILICONFLOW_API_KEY",
       stream = true,
       multi_round = true,
+      temperature = 0.6,
       user_role = "user",
       models = { "deepseek-ai/DeepSeek-V3", "deepseek-ai/DeepSeek-R1" },
     },
