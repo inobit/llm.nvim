@@ -59,7 +59,7 @@ end
 function SessionIndex:rename(new_name)
   self.name = new_name
   SessionManager:_save()
-  notify.info("session renamed", string.format("session %s renamed to %s.", self.id, new_name))
+  notify.info("session renamed.", string.format("session %s renamed to %s.", self.id, new_name))
 end
 
 function SessionIndex:delete()
@@ -67,9 +67,7 @@ function SessionIndex:delete()
   if io.file_is_exist(path) then
     io.rm_file(path)
   end
-  SessionManager.session_list[self.id] = nil
-  SessionManager:_save()
-  notify.info("session deleted", string.format("session %s deleted.", self.name))
+  notify.info("session deleted.", string.format("session %s deleted.", self.name))
 end
 
 ---@param server string
@@ -119,7 +117,7 @@ function Session:save()
     self:_generate_session_name()
   end
   SessionManager:_save()
-  notify.info("session saved", string.format("session %s saved.", self.name))
+  notify.info("session saved.", string.format("session %s saved.", self.name))
 end
 
 ---@return llm.session.Message[]
