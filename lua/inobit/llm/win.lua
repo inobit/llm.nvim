@@ -3,7 +3,14 @@ local config = require "inobit.llm.config"
 local util = require "inobit.llm.util"
 
 ---@class llm.win.WinStack
+---@field _zindex integer
 M.WinStack = {}
+
+M.WinStack._zindex = 100
+
+function M.WinStack:_zindex_increment()
+  self._zindex = self._zindex + 1
+end
 
 ---@type table<integer, integer>
 M.WinStack.stack = {}
@@ -65,19 +72,11 @@ function M.FloatingWin:new(opts)
   ---@diagnostic disable-next-line: missing-fields
   local this = {}
   local bufnr = opts.bufnr or vim.api.nvim_create_buf(false, true)
-  local winid = vim.api.nvim_open_win(bufnr, false, {
-    relative = "editor",
-    width = opts.width,
-    height = opts.height,
-    row = opts.row,
-    col = opts.col,
-    style = "minimal",
-    border = "rounded",
-    title = opts.title,
-    title_pos = "center",
-    focusable = true,
-  })
-  if opts.winblend then
+  local winblend = opts.winblend
+  opts.winblend = nil
+  opts.bufnr = nil
+  local winid = vim.api.nvim_open_win(bufnr, false, opts)
+  if winblend then
     vim.api.nvim_set_option_value("winblend", opts.winblend, { win = winid })
   end
   this.bufnr = bufnr
@@ -170,12 +169,6 @@ end
 ---@field floats table<llm.win.chatWin.FloatsKind, llm.win.FloatingWin>
 M.ChatWin = {}
 M.ChatWin.__index = M.ChatWin
-M.ChatWin._zindex = 1000
-
----@private
-function M.ChatWin:_zindex_increment()
-  self._zindex = self._zindex + 1
-end
 
 ---@private
 ---@param close_prev_handler? fun()
@@ -228,7 +221,12 @@ function M.ChatWin:new(opts)
     winblend = chat_win.winblend,
     title = opts.title,
     bufnr = opts.response_bufnr,
-    zindex = M.ChatWin._zindex,
+    zindex = M.WinStack._zindex,
+    relative = "editor",
+    style = "minimal",
+    border = "rounded",
+    title_pos = "center",
+    focusable = true,
   }
 
   ---@type llm.win.WinConfig
@@ -240,14 +238,19 @@ function M.ChatWin:new(opts)
     winblend = chat_win.winblend,
     title = "input",
     bufnr = opts.input_bufnr,
-    zindex = M.ChatWin._zindex,
+    zindex = M.WinStack._zindex,
+    relative = "editor",
+    style = "minimal",
+    border = "rounded",
+    title_pos = "center",
+    focusable = true,
   }
 
   local response_win = M.FloatingWin:new(response_opts)
 
   local input_win = M.FloatingWin:new(input_opts)
 
-  M.ChatWin:_zindex_increment()
+  M.WinStack:_zindex_increment()
 
   this.floats = { response = response_win, input = input_win }
 
@@ -377,7 +380,13 @@ function M.PickerWin:new(opts)
     row = input_top,
     col = left,
     winblend = opts.winOptions.winblend,
+    zindex = M.WinStack._zindex,
     title = "input",
+    relative = "editor",
+    style = "minimal",
+    border = "rounded",
+    title_pos = "center",
+    focusable = true,
   }
 
   ---@type llm.win.WinConfig
@@ -387,12 +396,20 @@ function M.PickerWin:new(opts)
     row = content_top,
     col = left,
     winblend = opts.winOptions.winblend,
+    zindex = M.WinStack._zindex,
     title = opts.title,
+    relative = "editor",
+    style = "minimal",
+    border = "rounded",
+    title_pos = "center",
+    focusable = true,
   }
 
   local input_win = M.FloatingWin:new(input_opts)
 
   local content_win = M.FloatingWin:new(content_opts)
+
+  M.WinStack:_zindex_increment()
 
   this.floats = { input = input_win, content = content_win }
 
