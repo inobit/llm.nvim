@@ -1,16 +1,26 @@
 local M = {}
-local Chat = require "inobit.llm.chat"
+local ChatManager = require "inobit.llm.chat"
 local SessionManager = require "inobit.llm.session"
 local ServerManager = require "inobit.llm.server"
 local translate = require "inobit.llm.translate"
 
 M.new_chat = function()
-  Chat:new()
+  ChatManager:new()
+end
+
+---@return integer
+M.has_chats = function()
+  return ChatManager:has_chats()
+end
+
+---@return integer
+M.has_active_chats = function()
+  return ChatManager:has_active_chats()
 end
 
 M.open_session_selector = function()
   SessionManager:open_selector(function(session)
-    Chat:new(session)
+    ChatManager:new(session)
   end)
 end
 

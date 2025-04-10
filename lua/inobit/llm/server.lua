@@ -16,6 +16,7 @@ local notify = require "inobit.llm.notify"
 ---| "in_file"
 
 ---@alias llm.server.StopSignal
+---| 0    normal
 ---| 1000 user canceled
 ---| 1001 new request override
 ---| 1002 parsing error
@@ -42,7 +43,6 @@ local notify = require "inobit.llm.notify"
 ---@field exit number
 
 ---@class llm.Server: llm.server.ServerOptions
----@field current_request? Job
 local Server = {}
 Server.__index = Server
 
@@ -137,7 +137,6 @@ end
 ---@param error_callback? fun(err: llm.server.Error)
 ---@return Job | llm.server.Response | nil
 function Server:request(input, server_params, curl_args, exit_callback, stream_callback, error_callback)
-  self:stop_request(1001)
   local auth = vim.fn.getenv(self.api_key_name)
   if not auth or auth == vim.NIL then
     self:_check_api_key()
@@ -168,18 +167,7 @@ function Server:request(input, server_params, curl_args, exit_callback, stream_c
       )
     end
     local job = curl.request(opts)
-    if job and job:is_job() then
-      self.current_request = job
-    end
     return job
-  end
-end
-
----@param signal? llm.server.StopSignal
-function Server:stop_request(signal)
-  if self.current_request then
-    self.current_request:shutdown(signal)
-    self.current_request = nil
   end
 end
 

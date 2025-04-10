@@ -4,6 +4,7 @@ local SessionManager = require "inobit.llm.session"
 local ServerManager = require "inobit.llm.server"
 local win = require "inobit.llm.win"
 local hl = require "inobit.llm.highlights"
+local Spinner = require "inobit.llm.spinner"
 
 ---@class llm.chat.ActiveChatBuffer
 ---@field input_bufnr? integer
@@ -13,75 +14,95 @@ local hl = require "inobit.llm.highlights"
 ---@field win llm.win.ChatWin
 ---@field session llm.Session
 ---@field server llm.Server
+---@field requesting? Job
+---@field spinner llm.Spinner
 local Chat = {}
 Chat.__index = Chat
 
----static object
----@private
----@type llm.Chat
-Chat._active_chat = nil
+---@class llm.chat.ChatManager
+---@field chats table<string, llm.Chat>
+---@field last_used_chat llm.Chat
+local ChatManager = {}
+ChatManager.__index = ChatManager
+ChatManager.chats = {}
 
----@param session? llm.Session
----@return llm.Chat
-function Chat:new(session)
-  local input_bufnr, response_bufnr
-  local deep = true
-  ---@type llm.Chat
-  local this = setmetatable({}, Chat)
-  -- existing session,reuse buffer
-  if Chat._active_chat and ((session and session == Chat._active_chat.session) or not session) then
-    -- if the floating window is already open, do nothing.
-    if vim.api.nvim_win_is_valid(Chat._active_chat.win.floats.input.winid) then
-      return Chat._active_chat
-    end
-    this.session = Chat._active_chat.session
-    this.server = Chat._active_chat.server
-    input_bufnr = Chat._active_chat.win.floats.input.bufnr
-    response_bufnr = Chat._active_chat.win.floats.response.bufnr
-    deep = false
-  -- existing session or new session ,new buffer
-  else
-    this.session = session
-      or SessionManager:new_session(ServerManager.chat_server.server, ServerManager.chat_server.model)
-    this.server = ServerManager.servers[this.session.server .. "@" .. this.session.model]
-    deep = true
-  end
-
-  this.win = win.ChatWin:new {
-    title = this.session.server .. "@" .. this.session.model,
-    input_bufnr = input_bufnr,
-    response_bufnr = response_bufnr,
-  }
-
-  -- asynchronous execution ensures it runs after ChatWin:new
-  vim.schedule(function()
-    Chat:_clean_old_chat(deep, this)
-  end)
-
-  this:_resume_session()
-  this:_register_input_enter_keymap()
-  this:_register_new_chat_keymap()
-  return this
+---used for lualine status
+---@return integer
+function ChatManager:has_chats()
+  return #vim.tbl_keys(self.chats)
 end
 
----static function,self must be Chat
----@private
----@param deep boolean
----@param new_chat llm.Chat
-function Chat:_clean_old_chat(deep, new_chat)
-  if Chat._active_chat then
-    win.WinStack:delete(Chat._active_chat.win.floats.response.winid)
-    win.WinStack:delete(Chat._active_chat.win.floats.input.winid)
-    if #Chat._active_chat.session.content > 0 then
-      Chat._active_chat.session:save()
-    end
-    Chat._active_chat.win.floats.response:close()
-    if deep then
-      pcall(vim.api.nvim_buf_delete, Chat._active_chat.win.floats.input.bufnr, { force = true })
-      pcall(vim.api.nvim_buf_delete, Chat._active_chat.win.floats.response.bufnr, { force = true })
-    end
+---@return integer
+function ChatManager:has_active_chats()
+  return #vim.tbl_filter(function(chat)
+    return chat.requesting ~= nil
+  end, self.chats)
+end
+
+---@param session? llm.Session
+function ChatManager:new(session)
+  local exists_chat, exists_session, new_chat
+  exists_session = session
+  if exists_session then
+    exists_chat = self.chats[exists_session.id]
+  else
+    exists_chat = self.last_used_chat
   end
-  Chat._active_chat = new_chat
+
+  if exists_chat then
+    if exists_chat ~= self.last_used_chat or not vim.api.nvim_win_is_valid(exists_chat.win.floats.response.winid) then
+      -- exists chat,change the chat's win options
+      new_chat = Chat:new(exists_chat)
+    end
+  else
+    -- new chat,exists session or new session
+    new_chat = Chat:new(nil, exists_session)
+  end
+
+  if new_chat then
+    self.chats[new_chat.session.id] = new_chat
+    vim.schedule(function()
+      if self.last_used_chat and self.last_used_chat ~= new_chat then
+        win.WinStack:delete(self.last_used_chat.win.floats.response.winid)
+        win.WinStack:delete(self.last_used_chat.win.floats.input.winid)
+        self.last_used_chat.win.floats.response:close()
+      end
+      self.last_used_chat = new_chat
+    end)
+  end
+end
+
+---@param exists_chat? llm.Chat
+---@param exists_session? llm.Session
+---@return llm.Chat
+function Chat:new(exists_chat, exists_session)
+  local this = exists_chat
+  if this then
+    -- update win
+    this.win = win.ChatWin:new {
+      title = this.session.server .. "@" .. this.session.model,
+      input_bufnr = this.win.floats.input.bufnr,
+      response_bufnr = this.win.floats.response.bufnr,
+    }
+  else
+    this = setmetatable({}, Chat)
+    this.session = exists_session
+      or SessionManager:new_session(ServerManager.chat_server.server, ServerManager.chat_server.model)
+    this.server = ServerManager.servers[this.session.server .. "@" .. this.session.model]
+    this.win = win.ChatWin:new {
+      title = this.session.server .. "@" .. this.session.model,
+    }
+  end
+  this.spinner = Spinner:new(this.win.floats.input)
+  if this.requesting then
+    this.spinner:start()
+  else
+    this:_register_submit_keymap()
+  end
+
+  this:_resume_session()
+  this:_register_new_chat_keymap()
+  return this
 end
 
 ---@private
@@ -141,8 +162,13 @@ end
 
 ---stop request
 ---@param signal llm.server.StopSignal
-function Chat:_stop(signal)
-  self.server:stop_request(signal)
+function Chat:_close(signal)
+  if self.requesting then
+    if signal ~= 0 then
+      self.requesting:shutdown(signal)
+    end
+    self.requesting = nil
+  end
 end
 
 function Chat:_render()
@@ -153,25 +179,14 @@ function Chat:_render()
 end
 
 ---@private
----use <C-N> to create new chat
-function Chat:_register_new_chat_keymap()
-  local bufnrs = { self.win.floats.input.bufnr, self.win.floats.response.bufnr }
-  for _, bufnr in ipairs(bufnrs) do
-    vim.keymap.set({ "n", "i" }, "<C-N>", function()
-      self:new(SessionManager:new_session(ServerManager.chat_server.server, ServerManager.chat_server.model))
-    end, { buffer = bufnr, noremap = true, silent = true })
-  end
-end
-
----@private
 ---use <C-C> to stop request
 ---use <C-S> to save session
+--WARN: the buffer will be reused, and without rebinding, the reference of 'self' may cause confusion.
 function Chat:_register_stop_and_save_keymap()
   local bufnrs = { self.win.floats.input.bufnr, self.win.floats.response.bufnr }
   for _, bufnr in ipairs(bufnrs) do
     vim.keymap.set({ "n", "i" }, "<C-C>", function()
-      self:_stop(1000)
-      self:_remove_stop_request_keymap()
+      self:_close(1000)
     end, { buffer = bufnr, noremap = true, silent = true })
     vim.keymap.set({ "n", "i" }, "<C-S>", function()
       self.session:save()
@@ -188,9 +203,21 @@ function Chat:_remove_stop_request_keymap()
 end
 
 ---@private
-function Chat:_register_input_enter_keymap()
+---use <C-N> to create new chat
+function Chat:_register_new_chat_keymap()
+  local bufnrs = { self.win.floats.input.bufnr, self.win.floats.response.bufnr }
+  for _, bufnr in ipairs(bufnrs) do
+    vim.keymap.set({ "n", "i" }, "<C-N>", function()
+      -- force creation of new chat
+      ChatManager:new(SessionManager:new_session(ServerManager.chat_server.server, ServerManager.chat_server.model))
+    end, { buffer = bufnr, noremap = true, silent = true })
+  end
+end
+
+---@private
+function Chat:_register_submit_keymap()
   local function submit()
-    self:_remove_input_enter_keymap()
+    self:_remove_submit_keymap()
     self:_input_enter_handler()
   end
   vim.keymap.set("n", "<CR>", submit, { buffer = self.win.floats.input.bufnr, noremap = true, silent = true })
@@ -199,7 +226,7 @@ function Chat:_register_input_enter_keymap()
 end
 
 ---@private
-function Chat:_remove_input_enter_keymap()
+function Chat:_remove_submit_keymap()
   pcall(vim.keymap.del, "n", "<CR>", { buffer = self.win.floats.input.bufnr, noremap = true, silent = true })
   pcall(vim.keymap.del, "i", "<NL>", { buffer = self.win.floats.input.bufnr, noremap = true, silent = true })
 end
@@ -363,10 +390,23 @@ function Chat:_response_handler(
   end
 end
 
-function Chat:_spinner() end
+---@private
+function Chat:_handle_session()
+  -- handle last 2 elements
+  local len = #self.session.content
+  if self.session.content[len].content and self.session.content[len].content == "" then
+    table.remove(self.session.content, len)
+  end
+  if self.session.content[len - 1].reasoning_content and self.session.content[len - 1].reasoning_content == "" then
+    table.remove(self.session.content, len - 1)
+  end
+  -- auto save
+  self.session:save()
+end
 
 ---@private
 function Chat:_after_begin()
+  self.spinner:start()
   -- self:_add_request_separator()
   self:_register_stop_and_save_keymap()
   if vim.api.nvim_win_is_valid(self.win.floats.response.winid) then
@@ -379,8 +419,11 @@ end
 
 ---@private
 function Chat:_after_stop()
+  self:_handle_session()
+  self.spinner:stop()
   self:_remove_stop_request_keymap()
-  self:_register_input_enter_keymap()
+  self:_register_submit_keymap()
+  self:_close(0)
 end
 
 ---@private
@@ -449,14 +492,6 @@ function Chat:_input_enter_handler()
   end
 
   local function on_exit()
-    -- add reasoning message to session
-    if response_reasoning_message.reasoning_content ~= "" then
-      self.session:add_message(response_reasoning_message)
-    end
-    -- add response message to session
-    if response_message.content ~= "" then
-      self.session:add_message(response_message)
-    end
     self:_after_stop()
     self:_add_round_separator()
   end
@@ -473,16 +508,24 @@ function Chat:_input_enter_handler()
   end
 
   -- send request,force stream mode
-  self.server:request(send_content, { stream = true }, nil, on_exit, on_stream, on_error)
+  local job = self.server:request(send_content, { stream = true }, nil, on_exit, on_stream, on_error)
+
+  if job and job:is_job() then
+    self.requesting = job --[[@as Job]]
+  end
 
   self:_after_begin()
 
   -- add input to session
   self.session:add_message(input_message)
+  -- add reasoning message to session
+  self.session:add_message(response_reasoning_message)
+  -- add response message to session
+  self.session:add_message(response_message)
   -- clear input
   vim.api.nvim_buf_set_lines(self.win.floats.input.bufnr, 0, -1, false, {})
   -- write input to response buf
   self:_write_lines_to_response(self:_build_input_render_style(input_lines))
 end
 
-return Chat
+return ChatManager
