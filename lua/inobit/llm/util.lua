@@ -151,6 +151,7 @@ end
 function M.data_filter(input, data)
   if data then
     return vim.tbl_filter(function(line)
+      line = line or ""
       return string.lower(line):find(string.lower(input)) ~= nil
     end, data)
   else
