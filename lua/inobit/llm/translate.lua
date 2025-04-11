@@ -7,8 +7,8 @@ local win = require "inobit.llm.win"
 local Spinner = require("inobit.llm.spinner").TextSpinner
 
 ---@class llm.translate.PromptOptions
----@field output_content string
----@field output_format string
+---@field task_specification string
+---@field format_requirements string
 ---@field source_lang string
 ---@field target_lang string
 ---@field text string
@@ -18,14 +18,30 @@ local Spinner = require("inobit.llm.spinner").TextSpinner
 ---@return llm.session.Message[]
 local function build_translation_prompt(params)
   local system_prompt = [[
-    As a professional language processing engine, perform precise text translation tasks. please accurately convert the source language content to the target language. translation requirements: 
-    1. maintain the semantic integrity of the original text. 
-    2. comply with the grammatical norms of the target language. 
-    3. retain the original meaning of professional terms. 
-    4. output the result only (without any comments). 
-    5. output content: %s
-    6. output format: %s]]
-  system_prompt = system_prompt:format(params.output_content, params.output_format)
+    ### Translation Specialist Guidelines
+    
+    **Core Principles**
+    1. Semantic Preservation: Maintain original meaning integrity
+    2. Grammatical Accuracy: Strictly follow target language norms
+    3. Terminology Consistency: Preserve domain-specific terms
+    
+    **Task Specification**
+    %s
+    
+    **Format Requirements**
+    %s
+    
+    **Style Constraints**
+    - Prohibit markdown/formatting symbols
+    - Exclude explanatory notes
+    - Avoid emoji/special characters
+    - Strictly use requested casing
+    
+    **Output Validation**
+    1. Check semantic equivalence
+    2. Verify terminology consistency
+    3. Ensure format compliance]]
+  system_prompt = system_prompt:format(params.task_specification, params.format_requirements)
   local content = "translate the following %s statement into %s：'%s'"
   content = content:format(params.source_lang, params.target_lang, params.text:gsub("'", "''"))
 
@@ -36,14 +52,26 @@ local function build_translation_prompt(params)
 end
 
 ---@param text string
----@param format translate_format
+---@param specification translate_specification
 ---@return llm.session.Message[]
-local function translate_en_to_zh(text, format)
+local function translate_en_to_zh(text, specification)
   return build_translation_prompt {
-    output_content = format == "complex"
-        and "plain text,use natural language,first letter lowercase,and American and British phonetic symbols"
-      or "plain text,use natural language,first letter lowercase",
-    output_format = format == "complex" and "美/phonetic/ \n 英/phonetic/ \n plain text" or "plain text",
+    task_specification = specification == "complex" and [[
+    **Phonetic Requirements**
+    - Include US/UK IPA transcriptions
+    - Format phonetics between /slashes/
+    - Prioritize primary stress markers
+    
+    Example:
+    "Hello" → 美/həˈloʊ/ 英/hɛˈləʊ/]] or "Natural language output",
+    format_requirements = specification == "complex" and [[
+    **Structured Output Format**
+    美: /.../
+    英: /.../ 
+    (Translation plain text)]] or [[
+    **Format Constraints**
+    1. No markdown/formatting symbols
+    2. Avoid ellipsis(...) truncation]],
     source_lang = "english",
     target_lang = "simplified chinese",
     text = text,
@@ -51,14 +79,27 @@ local function translate_en_to_zh(text, format)
 end
 
 ---@param text string
----@param format translate_format
+---@param specification translate_specification
 ---@return llm.session.Message[]
-local function translate_zh_to_en_text(text, format)
+local function translate_zh_to_en_text(text, specification)
   return build_translation_prompt {
-    output_content = format == "complex"
-        and "plain text,use natural language,first letter lowercase,and American and British phonetic symbols"
-      or "plain text,use natural language,first letter lowercase",
-    output_format = format == "complex" and "美/phonetic/ \n 英/phonetic/ \n plain text" or "plain text",
+    task_specification = specification == "complex" and [[
+    **Phonetic Requirements**
+    - Include US/UK IPA transcriptions
+    - Format phonetics between /slashes/
+    - Prioritize primary stress markers
+    
+    Example:
+    "Hello" → 美/həˈloʊ/ 英/hɛˈləʊ/]] or "Natural language output with lowercase initial letter",
+    format_requirements = specification == "complex" and [[
+    **Structured Output Format**
+    美: /.../
+    英: /.../ 
+    (Translation plain text)]] or [[
+    **Format Constraints**
+    1. No markdown/formatting symbols
+    2. Lowercase initial letter (except proper nouns)
+    3. Avoid ellipsis(...) truncation]],
     source_lang = "simplified chinese",
     target_lang = "english",
     text = text,
@@ -69,8 +110,26 @@ end
 ---@return llm.session.Message[]
 local function translate_zh_to_en_var_camel(text)
   return build_translation_prompt {
-    output_content = "variables in camel case, if the variables character count is greater than 20, then perform reasonable abbreviation.",
-    output_format = "plain text",
+    task_specification = [[
+    **CamelCase Conversion Rules**
+    1. Word Segmentation: Split using NLP tokenization
+    2. Connector Handling: Remove all spaces、-、_
+    3. Capitalization:
+       - First word lowercase
+       - Subsequent words capitalized
+    4. Abbreviation Logic:
+       | Length   | Strategy                   | Example                |
+       |----------|----------------------------|------------------------|
+       | ≤20 chars| Full words                 | 用户权限 → userPermission |
+       | >20 chars| Per-word first 3 letters*  | 分布式事务处理系统 → distTransProcSys |
+    5. Exclusion Rules:
+       - Remove articles (a/an/the)
+       - Remove auxiliary verbs (is/are)
+    6. Edge Cases:
+       - Mixed languages → "User权限" → userAuth
+       - Acronyms → "API网关" → apiGateway
+       - Numbers → "版本2" → version2]],
+    format_requirements = "Translation plain text",
     source_lang = "simplified chinese",
     target_lang = "english",
     text = text,
@@ -81,15 +140,36 @@ end
 ---@return llm.session.Message[]
 local function translate_zh_to_en_var_underline(text)
   return build_translation_prompt {
-    output_content = "variables in underscore naming convention, if the variables character count is greater than 20, then perform reasonable abbreviation.",
-    output_format = "plain text",
+    task_specification = [[
+    **Snake_case Conversion Rules**
+    1. Delimiter: _ between semantic units
+    2. Case Policy: Strict lowercase
+    3. Abbreviation Matrix:
+       | Condition              | Strategy                  | Example                |
+       |------------------------|---------------------------|------------------------|
+       | Total length ≤20 chars | Full words                | 用户配置 → user_config     |
+       | Total length >20 chars | Compress per-word (see below) |
+    4. Per-word Compression:
+       - Keep first 3 consonants
+       - Remove vowels after 3rd letter
+       - Exceptions:
+         * 4-letter words → first 3 letters
+         * Proper nouns → first 4 letters
+    5. Edge Case Handling:
+       - Numbers → "版本2" → ver2
+       - Mixed case → "userConfig" → user_config
+       - Consecutive vowels → "管理员" → mgmt
+    6. Validation:
+       - No consecutive underscores
+       - Final length ≤32 chars]],
+    format_requirements = "Translation plain text",
     source_lang = "simplified chinese",
     target_lang = "english",
     text = text,
   }
 end
 
----@alias translate_format "complex" | "simple"
+---@alias translate_specification "complex" | "simple"
 ---@alias text_from "buffer" | "cmdline
 ---@alias translate_type "E2Z" | "Z2E" | "Z2E_CAMEL" | "Z2E_UNDERLINE"
 
@@ -110,11 +190,11 @@ function M.get_translate_status()
 end
 
 ---@param type translate_type
----@param format translate_format
+---@param specification translate_specification
 ---@param from text_from
 ---@param text string
 ---@param callback fun(content: string,from?: text_from)
-function M.translate(type, format, from, text, callback)
+function M.translate(type, specification, from, text, callback)
   -- check text
   if util.empty_str(text) then
     return
@@ -128,9 +208,9 @@ function M.translate(type, format, from, text, callback)
 
   local messages = nil
   if type == "E2Z" then
-    messages = translate_en_to_zh(text, format)
+    messages = translate_en_to_zh(text, specification)
   elseif type == "Z2E" then
-    messages = translate_zh_to_en_text(text, format)
+    messages = translate_zh_to_en_text(text, specification)
   elseif type == "Z2E_CAMEL" then
     messages = translate_zh_to_en_var_camel(text)
   elseif type == "Z2E_UNDERLINE" then
@@ -228,7 +308,7 @@ end
 ---@param replace boolean
 ---@param type translate_type
 ---@param text string
----@return translate_format
+---@return translate_specification
 local function detect_format(replace, type, text)
   local format = "simple"
   if not replace and type ~= "Z2E_CAMEL" and type ~= "Z2E_UNDERLINE" then
@@ -269,7 +349,5 @@ function M.translate_in_cmdline(text, type)
   text = vim.trim(text)
   M.translate(type, detect_format(false, type, text), "cmdline", text, vim.schedule_wrap(hover_result))
 end
-
---TODO: lualine spinner
 
 return M
