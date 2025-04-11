@@ -5,6 +5,7 @@ local win = require "inobit.llm.win"
 ---@field frames string[]
 ---@field current_frame integer
 ---@field active boolean
+---@field frequency? integer
 ---@field timer? uv_timer_t
 local Spinner = {}
 Spinner.__index = Spinner
@@ -23,9 +24,11 @@ TextSpinner.__index = TextSpinner
 setmetatable(TextSpinner, Spinner)
 
 ---@param frames? string[]
-function Spinner:_new(frames)
+---@param frequency? integer
+function Spinner:_new(frames, frequency)
   local this = {}
   this.frames = frames or { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
+  this.frequency = frequency or 100
   this.current_frame = 1
   this.active = false
   return this
@@ -33,16 +36,18 @@ end
 
 ---@param anchor llm.win.FloatingWin
 ---@param frames? string[]
-function FloatSpinner:new(anchor, frames)
-  local this = Spinner:_new(frames)
+---@param frequency? integer
+function FloatSpinner:new(anchor, frames, frequency)
+  local this = Spinner:_new(frames, frequency)
   this.anchor = anchor
   return setmetatable(this, FloatSpinner)
 end
 
 ---@param anchor {value: string | nil}
 ---@param frames? string[]
-function TextSpinner:new(anchor, frames)
-  local this = Spinner:_new(frames)
+---@param frequency? integer
+function TextSpinner:new(anchor, frames, frequency)
+  local this = Spinner:_new(frames, frequency)
   this.anchor = anchor
   return setmetatable(this, TextSpinner)
 end
@@ -109,7 +114,7 @@ function Spinner:start()
   self.timer = vim.uv.new_timer()
   self.timer:start(
     0,
-    100,
+    self.frequency,
     vim.schedule_wrap(function()
       if not self.active then
         return
