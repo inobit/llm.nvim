@@ -44,4 +44,6 @@ end
 
 M.translate_in_buffer = translate.translate_in_buffer
 
+M.is_translating = translate.get_translate_status
+
 return M
