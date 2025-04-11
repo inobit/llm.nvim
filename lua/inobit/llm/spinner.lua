@@ -5,27 +5,52 @@ local win = require "inobit.llm.win"
 ---@field frames string[]
 ---@field current_frame integer
 ---@field active boolean
----@field relative_floating llm.win.FloatingWin
----@field loading? llm.win.FloatingWin
 ---@field timer? uv_timer_t
 local Spinner = {}
 Spinner.__index = Spinner
 
----@param relative_floating llm.win.FloatingWin
+---@class llm.FloatSpinner: llm.Spinner
+---@field anchor llm.win.FloatingWin
+---@field loading? llm.win.FloatingWin
+local FloatSpinner = {}
+FloatSpinner.__index = FloatSpinner
+setmetatable(FloatSpinner, Spinner)
+
+---@class llm.TextSpinner: llm.Spinner
+---@field anchor  {value: string | nil}
+local TextSpinner = {}
+TextSpinner.__index = TextSpinner
+setmetatable(TextSpinner, Spinner)
+
 ---@param frames? string[]
-function Spinner:new(relative_floating, frames)
+function Spinner:_new(frames)
   local this = {}
   this.frames = frames or { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
   this.current_frame = 1
   this.active = false
-  this.relative_floating = relative_floating
-  return setmetatable(this, Spinner)
+  return this
 end
 
-function Spinner:_show_frame()
+---@param anchor llm.win.FloatingWin
+---@param frames? string[]
+function FloatSpinner:new(anchor, frames)
+  local this = Spinner:_new(frames)
+  this.anchor = anchor
+  return setmetatable(this, FloatSpinner)
+end
+
+---@param anchor {value: string | nil}
+---@param frames? string[]
+function TextSpinner:new(anchor, frames)
+  local this = Spinner:_new(frames)
+  this.anchor = anchor
+  return setmetatable(this, TextSpinner)
+end
+
+function FloatSpinner:_show_frame()
   self:_close_frame()
 
-  if not self.relative_floating.winid or not vim.api.nvim_win_is_valid(self.relative_floating.winid) then
+  if not self.anchor.winid or not vim.api.nvim_win_is_valid(self.anchor.winid) then
     self:stop()
     return
   end
@@ -40,7 +65,7 @@ function Spinner:_show_frame()
   ---@type llm.win.WinConfig
   local opts = {
     relative = "win",
-    win = self.relative_floating.winid,
+    win = self.anchor.winid,
     width = width,
     height = 1,
     -- row = math.min(buf_height, win_height),
@@ -57,12 +82,20 @@ function Spinner:_show_frame()
   vim.api.nvim_buf_set_lines(self.loading.bufnr, 0, -1, false, { display_text })
 end
 
-function Spinner:_close_frame()
+function FloatSpinner:_close_frame()
   if self.loading then
     self.loading:close()
     pcall(vim.api.nvim_buf_delete, self.loading.bufnr, { force = true })
     self.loading = nil
   end
+end
+
+function TextSpinner:_show_frame()
+  self.anchor.value = self.frames[self.current_frame]
+end
+
+function TextSpinner:_close_frame()
+  self.anchor.value = nil
 end
 
 function Spinner:start()
@@ -82,7 +115,7 @@ function Spinner:start()
         return
       end
       self.current_frame = self.current_frame % #self.frames + 1
-      self:_show_frame()
+      self--[[@as llm.FloatSpinner | llm.TextSpinner]]:_show_frame()
     end)
   )
 end
@@ -94,7 +127,10 @@ function Spinner:stop()
     self.timer:close()
     self.timer = nil
   end
-  self:_close_frame()
+  self--[[@as llm.FloatSpinner | llm.TextSpinner]]:_close_frame()
 end
 
-return Spinner
+local M = {}
+M.FloatSpinner = FloatSpinner
+M.TextSpinner = TextSpinner
+return M

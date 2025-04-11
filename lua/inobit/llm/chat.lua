@@ -4,7 +4,7 @@ local SessionManager = require "inobit.llm.session"
 local ServerManager = require "inobit.llm.server"
 local win = require "inobit.llm.win"
 local hl = require "inobit.llm.highlights"
-local Spinner = require "inobit.llm.spinner"
+local Spinner = require("inobit.llm.spinner").FloatSpinner
 
 ---@class llm.chat.ActiveChatBuffer
 ---@field input_bufnr? integer
