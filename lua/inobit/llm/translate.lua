@@ -207,6 +207,7 @@ function M.translate(type, specification, from, text, callback)
   end
 
   local messages = nil
+  --TODO: add DeepL support for E2Z and Z2E
   if type == "E2Z" then
     messages = translate_en_to_zh(text, specification)
   elseif type == "Z2E" then
@@ -234,13 +235,13 @@ end
 ---@param content string
 ---@param from text_from
 local function hover_result(content, from)
+  local padding = 1
   local lines = vim.split(content, "\n")
   local width = 0
   local height = 0
-  local max_width = math.floor(vim.o.columns * 0.5)
-  local min_width = math.floor(vim.o.columns * 0.1)
+  local max_width = math.floor(vim.o.columns * 0.5) - 2
   vim.iter(lines):each(function(line)
-    local line_width = math.max(vim.fn.strdisplaywidth(line), min_width)
+    local line_width = vim.fn.strdisplaywidth(line)
     if line_width > max_width then
       height = height + math.ceil(line_width / max_width)
       line_width = max_width
@@ -250,9 +251,7 @@ local function hover_result(content, from)
     width = math.max(width, line_width)
   end)
 
-  table.insert(lines, "")
-  table.insert(lines, 1, "")
-  height = math.min(math.floor(vim.o.lines * 0.5), height + 2)
+  height = math.min(math.floor(vim.o.lines * 0.5) - 2, height)
 
   local independent_opts
   if from == "buffer" then
@@ -283,14 +282,14 @@ local function hover_result(content, from)
 
   ---@type llm.win.WinConfig
   local opts = vim.tbl_extend("force", {
-    width = width,
-    height = height,
+    width = width + 2,
+    height = height + 2,
     style = "minimal",
     border = "none",
     focusable = true,
   }, independent_opts)
 
-  local floating = win.FloatingWin:new(opts)
+  local floating = win.PaddingFloatingWin:new(opts, padding)
 
   vim.api.nvim_create_autocmd("cursormoved", {
     group = vim.api.nvim_create_augroup("llm_ts_clean_float", { clear = true }),
