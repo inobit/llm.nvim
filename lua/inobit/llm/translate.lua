@@ -222,7 +222,7 @@ function M.translate(translate_type, specification, from, text, callback)
     end
     opts = server:build_request_opts(messages, { stream = false, temperature = 1.3 })
   elseif server:is_translate_server() then
-    messages.text = text
+    messages.text = server.clean_source_text and server:clean_source_text(text) or text
     if vim.startswith(translate_type, "E2Z") then
       messages.target_lang = "ZH"
     elseif vim.startswith(translate_type, "Z2E") then

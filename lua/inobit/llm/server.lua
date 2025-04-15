@@ -192,6 +192,10 @@ function DeepLServer:build_request_opts(body, curl_args)
   return Server.build_request_opts(self, body, curl_args)
 end
 
+function DeepLServer:clean_source_text(text)
+  return text:gsub("\n+", " ")
+end
+
 ---@param data llm.server.Response
 ---@return llm.server.deepl.text.ResponseBody
 function DeepLServer:parse_translation_result(data)
