@@ -510,6 +510,18 @@ function Chat:_input_enter_handler()
   if self.server.multi_round then
     send_content = self.session:multi_round_filter()
     table.insert(send_content, input_message)
+
+    -- deepseek-reasoner does not support...You should interleave the user/assistant messages in the message sequence
+    -- filter no response question
+    local role = ""
+    for i = #send_content, 1, -1 do
+      if send_content[i].role ~= role then
+        role = send_content[i].role
+      else
+        -- For consecutive identical roles, only the last one is kept, i.e., only the last question is sent
+        table.remove(send_content, i)
+      end
+    end
   end
 
   -- send request,force stream mode
