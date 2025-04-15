@@ -529,8 +529,16 @@ function Chat:_input_enter_handler()
     end
   end
 
+  ---@type llm.server.RequestOpts
+  local opts = self
+    .server--[[@as llm.OpenAIServer]]
+    :build_request_opts(send_content, { stream = true })
+  opts.callback = on_exit
+  opts.stream = on_stream
+  opts.on_error = on_error
+
   -- send request,force stream mode
-  local job = self.server:request(send_content, { stream = true }, nil, on_exit, on_stream, on_error)
+  local job = self.server:request(opts)
 
   if job and job:is_job() then
     self.requesting = job --[[@as Job]]
