@@ -97,12 +97,16 @@ end
 
 --@private
 function Session:_generate_session_name()
+  local c = 0
   if self.content[1].content then
     local name = ""
     for i = 0, vim.fn.strchars(self.content[1].content) - 1 do
       local char = vim.fn.strcharpart(self.content[1].content, i, 1)
-      name = name .. char
-      if i == 20 then
+      if not string.match(char, "^%s$") then
+        name = name .. char
+        c = c + 1
+      end
+      if c == 20 then
         break
       end
     end
