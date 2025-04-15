@@ -398,7 +398,11 @@ function Chat:_handle_session()
   if self.session.content[len].content and self.session.content[len].content == "" then
     table.remove(self.session.content, len)
   end
-  if self.session.content[len - 1].reasoning_content and self.session.content[len - 1].reasoning_content == "" then
+  if
+    len > 1
+    and self.session.content[len - 1].reasoning_content
+    and self.session.content[len - 1].reasoning_content == ""
+  then
     table.remove(self.session.content, len - 1)
   end
   -- auto save
