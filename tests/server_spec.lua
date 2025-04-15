@@ -7,6 +7,7 @@ describe("Server Manager", function()
     servers = {
       {
         server = "test_server",
+        server_type = "chat",
         base_url = test_server_url,
         api_key_name = "TEST_API_KEY",
         models = { "test-model" },
@@ -26,8 +27,8 @@ describe("Server Manager", function()
   end)
 
   it("should build correct curl arguments", function()
-    local server = ServerManager.default_server
-    local args = server:_build_curl_opts({
+    local server = ServerManager.default_server --[[@as llm.OpenAIServer]]
+    local args = server:build_request_opts({
       { role = "user", content = "test" },
     }, nil, { method = "POST" })
     assert.equals(
@@ -45,7 +46,9 @@ describe("Server Manager", function()
   it("should handle streaming response", function()
     local received_chunks = 0
     local complete_response = ""
-    ServerManager.default_server:request({ { role = "user", content = "test" } }, nil, nil, nil, function(err, chunk)
+    ---@type llm.server.RequestOpts
+    local opts = ServerManager.default_server:build_request_opts { { role = "user", content = "test" } }
+    opts.stream = function(err, chunk)
       if not err then
         received_chunks = received_chunks + 1
         vim.schedule(function()
@@ -56,7 +59,8 @@ describe("Server Manager", function()
         end)
       end
       -- complete_response = complete_response .. chunk
-    end)
+    end
+    ServerManager.default_server:request(opts)
     vim.wait(3000, function()
       return false
     end)
