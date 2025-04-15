@@ -462,6 +462,11 @@ function Chat:_input_enter_handler()
 
   ---@param error string
   local function parse_error(error)
+    -- Comment lines in event streams that begin with a colon
+    if error:match "^:%s" then
+      -- maybe keep alive message,just ignore
+      return
+    end
     ---@type llm.server.Error
     local err_obj = {
       exit = 1002,
