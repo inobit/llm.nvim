@@ -12,6 +12,14 @@ AI chat, currently supports OpenAI API
   ```shell
   :TS [ E2Z | Z2E | Z2E_CAMEL | Z2E_UNDERLINE ] <text>
   ```
+- the server API key is set through environment variables
+  ```shell
+  export <your api key name> <key>
+  ```
+  or
+  ```lua
+  vim.fn.setenv("<your api key name>", "<key>")
+  ```
 
 # Installation
 
@@ -47,7 +55,26 @@ return {
     cmd = { "LLM", "TS" },
     main = "inobit/llm",
     -- your config
-    opts = {},
+    opts = {
+      servers = {
+        {
+          server = "DeepL",
+          server_type = "translate",
+          models = {
+            {
+              model = "DeepLX",
+              base_url = "http://localhost:1188/translate", -- self-build DeepLX(OwO-Network/DeepLX)
+              api_key_name = "DEEPLX_API_KEY",
+            },
+            {
+              model = "DeepL",
+              base_url = "https://api.deepl.com/translate", -- Authorization: DeepL-Auth-Key [yourAuthKey]
+              api_key_name = "DEEPL_API_KEY",
+            }
+          },
+        },
+      },
+    },
   },
 }
 ```
@@ -61,6 +88,7 @@ local function default_servers()
   return {
     {
       server = "DeepSeek",
+      server_type = "chat"
       base_url = "https://api.deepseek.com/v1/chat/completions",
       api_key_name = "DEEPSEEK_API_KEY",
       stream = true,
@@ -70,6 +98,7 @@ local function default_servers()
     },
     {
       server = "SiliconFlow",
+      server_type = "chat"
       base_url = "https://api.siliconflow.cn/v1/chat/completions",
       api_key_name = "SILICONFLOW_API_KEY",
       stream = true,
@@ -120,13 +149,15 @@ end
 :LLM TSServers # selcect translate server
 ```
 
-`<C-C>` end session in chat window
-`<C-S>` save session in chat window
-`<C-N>` create new session in chat window
-`r` rename session in session picker window
-`d` delete session in session picker window
+- `<C-C>` end session in chat window
+- `<C-S>` save session in chat window
+- `<C-N>` create new session in chat window
+- `r` rename session in session picker window
+- `d` delete session in session picker window
 
 # Integration
+
+## render-markdown
 
 You can use the [render-markdown.nvim](https://github.com/MeanderingProgrammer/render-markdown.nvim) plugin to render the AI's response.
 
@@ -174,5 +205,25 @@ return {
     },
   },
   ft = { "markdown", "norg", "rmd", "org", vim.g.inobit_filetype },
+}
+```
+
+## lualine
+
+```lua
+lualine_x = {
+  -- stylua: ignore start
+  {
+    function() return "󰗊 "..  require("inobit.llm.api").is_translating() end,
+    cond = function() return package.loaded["inobit.llm"] and require("inobit.llm.api").is_translating() ~= nil end,
+    color = function() return { fg = string.format("#%06x", vim.api.nvim_get_hl(0, { name = "Debug", link = false }).fg) } end,
+  },
+  {
+    function() return "󰅾 " .. require("inobit.llm.api"):has_active_chats() .. "/" .. require("inobit.llm.api"):has_chats() end,
+    cond = function() return package.loaded["inobit.llm"] and require("inobit.llm.api"):has_chats() > 0 end,
+    color = function() return { fg = string.format("#%06x", vim.api.nvim_get_hl(0, { name = "DiagnosticHint", link = false }).fg) } end,
+  },
+  -- your other status
+  -- stylua: ignore end
 }
 ```
