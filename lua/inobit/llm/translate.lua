@@ -189,47 +189,76 @@ function M.get_translate_status()
   return translate_status.value
 end
 
----@param type translate_type
+---@param translate_type translate_type
 ---@param specification translate_specification
 ---@param from text_from
 ---@param text string
 ---@param callback fun(content: string,from?: text_from)
-function M.translate(type, specification, from, text, callback)
+function M.translate(translate_type, specification, from, text, callback)
   -- check text
   if util.empty_str(text) then
     return
   end
 
   -- check type
-  if not vim.iter(types):find(type) then
+  if not vim.iter(types):find(translate_type) then
     notify.error "Invalid type"
     return
   end
 
-  local messages = nil
-  --TODO: add DeepL support for E2Z and Z2E
-  if type == "E2Z" then
-    messages = translate_en_to_zh(text, specification)
-  elseif type == "Z2E" then
-    messages = translate_zh_to_en_text(text, specification)
-  elseif type == "Z2E_CAMEL" then
-    messages = translate_zh_to_en_var_camel(text)
-  elseif type == "Z2E_UNDERLINE" then
-    messages = translate_zh_to_en_var_underline(text)
-  end
-  if messages then
-    local exit_callback = function(res)
-      if res.status == 200 then
-        local body = vim.json.decode(res.body)
-        callback(body.choices[1].message.content, from)
-      else
-        notify.error(string.format("Translate %s error: %s", res.status, res.body))
-      end
-      spinner:stop()
+  local server = ServerManager.translate_server --[[@as llm.OpenAIServer | llm.DeepLServer]]
+  local messages = {}
+  local opts = {}
+
+  if server:is_chat_server() then
+    if translate_type == "E2Z" then
+      messages = translate_en_to_zh(text, specification)
+    elseif translate_type == "Z2E" then
+      messages = translate_zh_to_en_text(text, specification)
+    elseif translate_type == "Z2E_CAMEL" then
+      messages = translate_zh_to_en_var_camel(text)
+    elseif translate_type == "Z2E_UNDERLINE" then
+      messages = translate_zh_to_en_var_underline(text)
     end
-    ServerManager.translate_server:request(messages, { stream = false, temperature = 1.3 }, nil, exit_callback)
-    spinner:start()
+    opts = server:build_request_opts(messages, { stream = false, temperature = 1.3 })
+  elseif server:is_translate_server() then
+    messages.text = text
+    if vim.startswith(translate_type, "E2Z") then
+      messages.target_lang = "ZH"
+    elseif vim.startswith(translate_type, "Z2E") then
+      messages.target_lang = "EN"
+    end
+    opts = server--[[@as llm.DeepLServer]]:build_request_opts(messages)
+  else
+    notify.error(string.format("Server %s not supported", server))
+    return
   end
+
+  local exit_callback = function(res)
+    if res.status == 200 then
+      local result = server:parse_translation_result(res)
+      if type(result) == "string" then
+        callback(result, from)
+      else
+        if specification == "simple" or result.alternatives == nil or #result.alternatives == 0 then
+          callback(result.data, from)
+        else
+          local style = { result.data, "备选:" }
+          result.alternatives = vim.tbl_map(function(str)
+            return "- " .. str
+          end, result.alternatives)
+          vim.list_extend(style, result.alternatives)
+          callback(table.concat(style, "\n"), from)
+        end
+      end
+    else
+      notify.error(string.format("Translate %s error: %s", res.status, res.body))
+    end
+    spinner:stop()
+  end
+  opts.callback = exit_callback
+  ServerManager.translate_server:request(opts)
+  spinner:start()
 end
 
 ---@param content string
@@ -290,6 +319,7 @@ local function hover_result(content, from)
   }, independent_opts)
 
   local floating = win.PaddingFloatingWin:new(opts, padding)
+  vim.bo[floating.bufnr].filetype = vim.g.inobit_filetype
 
   vim.api.nvim_create_autocmd("cursormoved", {
     group = vim.api.nvim_create_augroup("llm_ts_clean_float", { clear = true }),
@@ -305,12 +335,11 @@ local function hover_result(content, from)
 end
 
 ---@param replace boolean
----@param type translate_type
 ---@param text string
 ---@return translate_specification
-local function detect_format(replace, type, text)
+local function detect_format(replace, text)
   local format = "simple"
-  if not replace and type ~= "Z2E_CAMEL" and type ~= "Z2E_UNDERLINE" then
+  if not replace then
     --WARN: don't support UTF-8
     local punctuation_pattern = "[,.!?;:，。！？；：]"
     if not string.find(text, punctuation_pattern) then
@@ -336,7 +365,8 @@ function M.translate_in_buffer(replace, type)
     type = util.is_english(text) and "E2Z" or "Z2E"
   end
   text = vim.trim(text)
-  M.translate(type, detect_format(replace, type, text), "buffer", text, vim.schedule_wrap(callback))
+  --TODO: Manual converts into camel or underline mode
+  M.translate(type, detect_format(replace, text), "buffer", text, vim.schedule_wrap(callback))
 end
 
 ---@param text string
@@ -346,7 +376,7 @@ function M.translate_in_cmdline(text, type)
     type = util.is_english(text) and "E2Z" or "Z2E"
   end
   text = vim.trim(text)
-  M.translate(type, detect_format(false, type, text), "cmdline", text, vim.schedule_wrap(hover_result))
+  M.translate(type, detect_format(false, text), "cmdline", text, vim.schedule_wrap(hover_result))
 end
 
 return M
