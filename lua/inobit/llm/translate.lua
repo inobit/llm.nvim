@@ -189,6 +189,19 @@ function M.get_translate_status()
   return translate_status.value
 end
 
+---@param s string
+---@param t translate_type
+---@return string
+local function convert_to_variable(s, t)
+  if t == "Z2E_CAMEL" then
+    return util.simpleVariableConverter(s, "camel")
+  elseif t == "Z2E_UNDERLINE" then
+    return util.simpleVariableConverter(s, "underline")
+  else
+    return s
+  end
+end
+
 ---@param translate_type translate_type
 ---@param specification translate_specification
 ---@param from text_from
@@ -237,20 +250,19 @@ function M.translate(translate_type, specification, from, text, callback)
   local exit_callback = function(res)
     if res.status == 200 then
       local result = server:parse_translation_result(res)
-      if type(result) == "string" then
-        callback(result, from)
-      else
+      if type(result) == "table" then
         if specification == "simple" or result.alternatives == nil or #result.alternatives == 0 then
-          callback(result.data, from)
+          result = result.data
         else
           local style = { result.data, "备选:" }
           result.alternatives = vim.tbl_map(function(str)
             return "- " .. str
           end, result.alternatives)
           vim.list_extend(style, result.alternatives)
-          callback(table.concat(style, "\n"), from)
+          result = table.concat(style, "\n")
         end
       end
+      callback(convert_to_variable(result --[[@as string]], translate_type), from)
     else
       notify.error(string.format("Translate %s error: %s", res.status, res.body))
     end
@@ -365,7 +377,6 @@ function M.translate_in_buffer(replace, type)
     type = util.is_english(text) and "E2Z" or "Z2E"
   end
   text = vim.trim(text)
-  --TODO: Manual converts into camel or underline mode
   M.translate(type, detect_format(replace, text), "buffer", text, vim.schedule_wrap(callback))
 end
 

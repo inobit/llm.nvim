@@ -174,4 +174,25 @@ function M.get_current_line(bufnr, winid)
   end
 end
 
+---simple variable converter
+---@param s string
+---@param m "camel" | "underline"
+---@return string
+function M.simpleVariableConverter(s, m)
+  if not s:find "%s" then
+    return s
+  end
+  if m == "camel" then
+    local t = {}
+    for w in s:gmatch "[^%s]+" do
+      t[#t + 1] = #t < 1 and w:lower() or w:sub(1, 1):upper() .. w:sub(2):lower()
+    end
+    return table.concat(t)
+  elseif m == "underline" then
+    return s:gsub("%s+", "_"):lower()
+  else
+    return s
+  end
+end
+
 return M
