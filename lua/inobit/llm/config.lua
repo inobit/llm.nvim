@@ -2,6 +2,8 @@ local M = {}
 
 local Path = require "plenary.path"
 
+---@alias ServerType "chat" | "translate"
+
 ---@class llm.server.BaseOptions
 ---@field stream? boolean
 ---@field multi_round? boolean
@@ -11,7 +13,7 @@ local Path = require "plenary.path"
 ---@class llm.server.CommonOptions: llm.server.BaseOptions
 ---@field base_url string
 ---@field api_key_name string
----@field [string] any other options
+---@field server_type? ServerType
 
 ---@class llm.server.ServerOptions: llm.server.CommonOptions
 ---@field server string
@@ -53,6 +55,7 @@ local function default_servers()
   return {
     {
       server = "DeepSeek",
+      server_type = "chat",
       base_url = "https://api.deepseek.com/v1/chat/completions",
       api_key_name = "DEEPSEEK_API_KEY",
       stream = true,
@@ -63,6 +66,7 @@ local function default_servers()
     },
     {
       server = "SiliconFlow",
+      server_type = "chat",
       base_url = "https://api.siliconflow.cn/v1/chat/completions",
       api_key_name = "SILICONFLOW_API_KEY",
       stream = true,
