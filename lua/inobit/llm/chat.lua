@@ -372,10 +372,10 @@ function Chat:_response_handler(
     if chunk.choices[1].delta.reasoning_content and chunk.choices[1].delta.reasoning_content ~= vim.NIL then
       -- update reasoning message
       response_reasoning_message.role = chunk.choices[1].delta.role or response_reasoning_message.role
-      response_reasoning_message.reasoning_content = response_reasoning_message.reasoning_content
-        .. chunk.choices[1].delta.reasoning_content
+      local cleaned_str = chunk.choices[1].delta.reasoning_content:gsub("\n\n", "\n")
+      response_reasoning_message.reasoning_content = response_reasoning_message.reasoning_content .. cleaned_str
       -- write reasoning content to response buf
-      self:_write_reason_text_to_response(chunk.choices[1].delta.reasoning_content, start_think)
+      self:_write_reason_text_to_response(cleaned_str, start_think)
     else
       if start_think.in_line then
         self:_update_thinking_head(start_think.in_line)
@@ -383,9 +383,10 @@ function Chat:_response_handler(
       end
       -- update response message
       response_message.role = chunk.choices[1].delta.role or response_message.role
-      response_message.content = response_message.content .. chunk.choices[1].delta.content
+      local cleaned_str = chunk.choices[1].delta.content:gsub("\n\n", "\n")
+      response_message.content = response_message.content .. cleaned_str
       -- write response content to response buf
-      self:_write_answer_text_to_response(chunk.choices[1].delta.content, start_answer, start_think)
+      self:_write_answer_text_to_response(cleaned_str, start_answer, start_think)
     end
   end
 end
