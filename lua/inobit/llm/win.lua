@@ -362,8 +362,8 @@ function M.ChatWin:new(opts)
   vim.api.nvim_set_option_value("filetype", vim.g.inobit_filetype, { buf = input_win.bufnr })
   vim.api.nvim_set_option_value("filetype", vim.g.inobit_filetype, { buf = response_win.bufnr })
 
-  -- disable wrap
-  vim.api.nvim_set_option_value("wrap", false, { win = response_win.winid })
+  -- setup wrap
+  vim.api.nvim_set_option_value("wrap", true, { win = response_win.winid })
 
   -- push win stack
   M.WinStack:push(input_win.winid, cur_win)
