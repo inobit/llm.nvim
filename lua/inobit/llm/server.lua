@@ -199,7 +199,7 @@ end
 ---@param data llm.server.Response
 ---@return llm.server.deepl.text.ResponseBody
 function DeepLServer:parse_translation_result(data)
-  local body = vim.json.decode(data.body)
+  local body = vim.json.decode(data.body, { luanil = { object = true, array = true } })
   return body
 end
 
