@@ -297,9 +297,11 @@ local function hover_result(content, from)
   local independent_opts
   if from == "buffer" then
     local c_row, c_col = unpack(vim.api.nvim_win_get_cursor(0))
+    local win_height = vim.api.nvim_win_get_height(vim.api.nvim_get_current_win())
+    local top_line = vim.fn.line "w0"
     local v, h
     local row = 1
-    if c_row > math.floor(vim.o.lines * 0.5) then
+    if c_row - top_line > math.floor(win_height * 0.5) then
       v = "S"
       row = 0
     else
