@@ -9,6 +9,7 @@ local Path = require "plenary.path"
 ---@field multi_round? boolean
 ---@field user_role? string
 ---@field temperature? number
+---@field max_tokens? number
 
 ---@class llm.server.CommonOptions: llm.server.BaseOptions
 ---@field base_url string
@@ -61,6 +62,7 @@ local function default_servers()
       stream = true,
       multi_round = true,
       temperature = 0.6,
+      max_tokens = 4096,
       user_role = "user",
       models = { "deepseek-chat", "deepseek-reasoner" },
     },
@@ -72,6 +74,7 @@ local function default_servers()
       stream = true,
       multi_round = true,
       temperature = 0.6,
+      max_tokens = 4096,
       user_role = "user",
       models = { "deepseek-ai/DeepSeek-V3", "deepseek-ai/DeepSeek-R1" },
     },

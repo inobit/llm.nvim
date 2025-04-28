@@ -174,6 +174,7 @@ function OpenAIServer:build_request_opts(input, server_params, curl_args)
     messages = input,
     stream = self.stream,
     temperature = self.temperature or 0.6,
+    max_tokens = self.max_tokens or 4096,
   }, server_params or {})
   return Server.build_request_opts(self, body, curl_args)
 end
