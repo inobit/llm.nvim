@@ -52,6 +52,11 @@ OpenAIServer.__index = OpenAIServer
 -- extend Server
 setmetatable(OpenAIServer, ChatServer)
 
+---@class llm.OpenRouterServer: llm.OpenAIServer
+local OpenRouterServer = {}
+OpenRouterServer.__index = OpenRouterServer
+setmetatable(OpenRouterServer, OpenAIServer)
+
 ---@class llm.TranslateServer: llm.Server
 local TranslateServer = {}
 TranslateServer.__index = TranslateServer
@@ -163,6 +168,11 @@ function Server:build_request_opts(body, curl_args)
   )
 end
 
+---@return string
+function Server:get_reasoning_content_key()
+  return "reasoning_content"
+end
+
 ---build curl request,used for plenary curl
 ---@param input llm.session.Message[]
 ---@param server_params? llm.server.BaseOptions
@@ -177,6 +187,22 @@ function OpenAIServer:build_request_opts(input, server_params, curl_args)
     max_tokens = self.max_tokens or 4096,
   }, server_params or {})
   return Server.build_request_opts(self, body, curl_args)
+end
+
+---@param input llm.session.Message[]
+---@param server_params? llm.server.BaseOptions
+---@param curl_args? table<llm.server.plenaryCurlArgs,any>
+---@return llm.server.RequestOpts
+function OpenRouterServer:build_request_opts(input, server_params, curl_args)
+  server_params = server_params or {}
+  local reasoning = vim.tbl_deep_extend("force", vim.empty_dict(), self.reasoning or {}, server_params.reasoning or {})
+  server_params.reasoning = reasoning
+  return OpenAIServer.build_request_opts(self, input, server_params, curl_args)
+end
+
+---@return string
+function OpenRouterServer:get_reasoning_content_key()
+  return "reasoning"
 end
 
 ---@param data llm.server.Response
@@ -297,7 +323,11 @@ function ServerManager:init()
   for key, value in pairs(servers) do
     if not value.server_type or value.server_type == "chat" then
       --TODO: support more llm server
-      servers[key] = OpenAIServer:new(value)
+      if value.server == "OpenRouter" then
+        servers[key] = OpenRouterServer:new(value)
+      else
+        servers[key] = OpenAIServer:new(value)
+      end
     elseif value.server_type == "translate" then
       -- deepL deepLX
       if value.server:lower():find "deepl" then

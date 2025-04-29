@@ -367,12 +367,14 @@ function Chat:_response_handler(
     return
   end
 
+  local reasoning_content_key = self.server:get_reasoning_content_key()
+
   -- handle chunk
   if chunk.choices and chunk.choices[1] and chunk.choices[1].delta then
-    if chunk.choices[1].delta.reasoning_content and chunk.choices[1].delta.reasoning_content ~= vim.NIL then
+    if chunk.choices[1].delta[reasoning_content_key] and chunk.choices[1].delta[reasoning_content_key] ~= vim.NIL then
       -- update reasoning message
       response_reasoning_message.role = chunk.choices[1].delta.role or response_reasoning_message.role
-      local cleaned_str = chunk.choices[1].delta.reasoning_content:gsub("\n\n", "\n")
+      local cleaned_str = chunk.choices[1].delta[reasoning_content_key]:gsub("\n\n", "\n")
       response_reasoning_message.reasoning_content = response_reasoning_message.reasoning_content .. cleaned_str
       -- write reasoning content to response buf
       self:_write_reason_text_to_response(cleaned_str, start_think)
@@ -533,6 +535,7 @@ function Chat:_input_enter_handler()
   local opts = self
     .server--[[@as llm.OpenAIServer]]
     :build_request_opts(send_content, { stream = true })
+  P(opts)
   opts.callback = on_exit
   opts.stream = on_stream
   opts.on_error = on_error

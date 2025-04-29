@@ -4,12 +4,18 @@ local Path = require "plenary.path"
 
 ---@alias ServerType "chat" | "translate"
 
+---@class llm.server.Reasoning
+---@field effort? "high" | "medium" | "low"
+---@field max_tokens? number
+---@field exclude? boolean
+
 ---@class llm.server.BaseOptions
 ---@field stream? boolean
 ---@field multi_round? boolean
 ---@field user_role? string
 ---@field temperature? number
 ---@field max_tokens? number
+---@field reasoning? llm.server.Reasoning
 
 ---@class llm.server.CommonOptions: llm.server.BaseOptions
 ---@field base_url string
