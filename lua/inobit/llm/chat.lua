@@ -535,7 +535,6 @@ function Chat:_input_enter_handler()
   local opts = self
     .server--[[@as llm.OpenAIServer]]
     :build_request_opts(send_content, { stream = true })
-  P(opts)
   opts.callback = on_exit
   opts.stream = on_stream
   opts.on_error = on_error
