@@ -250,19 +250,21 @@ function M.translate(translate_type, specification, from, text, callback)
   local exit_callback = function(res)
     if res.status == 200 then
       local result = server:parse_translation_result(res)
-      if type(result) == "table" then
-        if specification == "simple" or result.alternatives == nil or #result.alternatives == 0 then
-          result = result.data
-        else
-          local style = { result.data, "备选:" }
-          result.alternatives = vim.tbl_map(function(str)
-            return "- " .. str
-          end, result.alternatives)
-          vim.list_extend(style, result.alternatives)
-          result = table.concat(style, "\n")
+      if result then
+        if type(result) == "table" then
+          if specification == "simple" or result.alternatives == nil or #result.alternatives == 0 then
+            result = result.data
+          else
+            local style = { result.data, "备选:" }
+            result.alternatives = vim.tbl_map(function(str)
+              return "- " .. str
+            end, result.alternatives)
+            vim.list_extend(style, result.alternatives)
+            result = table.concat(style, "\n")
+          end
         end
+        callback(convert_to_variable(result --[[@as string]], translate_type), from)
       end
-      callback(convert_to_variable(result --[[@as string]], translate_type), from)
     else
       notify.error(string.format("Translate %s error: %s", res.status, res.body))
     end

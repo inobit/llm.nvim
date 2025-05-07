@@ -206,10 +206,18 @@ function OpenRouterServer:get_reasoning_content_key()
 end
 
 ---@param data llm.server.Response
----@return string
+---@return string?
 function OpenAIServer:parse_translation_result(data)
   local body = vim.json.decode(data.body)
-  return body.choices[1].message.content
+  local content = vim.tbl_get(body, "choices", 1, "message", "content")
+  if content then
+    if content:sub(-1) == "\n" then
+      content = content:sub(1, -2)
+    end
+    return content
+  else
+    notify.error(string.format("no translation result found: %s", vim.json.encode(data.body)))
+  end
 end
 
 ---@param body llm.server.deepl.text.RequestBody
