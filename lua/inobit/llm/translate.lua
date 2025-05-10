@@ -271,8 +271,9 @@ function M.translate(translate_type, specification, from, text, callback)
     spinner:stop()
   end
   opts.callback = exit_callback
-  ServerManager.translate_server:request(opts)
-  spinner:start()
+  if ServerManager.translate_server:request(opts) ~= nil then
+    spinner:start()
+  end
 end
 
 ---@param content string

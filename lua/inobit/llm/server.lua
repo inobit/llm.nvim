@@ -157,9 +157,15 @@ end
 ---@param curl_args? table<llm.server.plenaryCurlArgs,any>
 ---@return llm.server.RequestOpts
 function Server:build_request_opts(body, curl_args)
+  ---@type string?
+  local auth = vim.fn.getenv(self.api_key_name)
+  if not auth or auth == vim.NIL then
+    -- check the api_key when request
+    auth = ""
+  end
   local headers = {
     content_type = "application/json",
-    authorization = "Bearer " .. vim.fn.getenv(self.api_key_name),
+    authorization = "Bearer " .. auth,
   }
   return vim.tbl_deep_extend(
     "keep",
