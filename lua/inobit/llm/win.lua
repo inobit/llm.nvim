@@ -517,8 +517,8 @@ function M.PickerWin:new(opts)
   this.floats = { input = input_win, content = content_win }
 
   -- set filetype
-  vim.api.nvim_set_option_value("filetype", vim.g.inobit_filetype, { buf = input_win.bufnr })
-  vim.api.nvim_set_option_value("filetype", vim.g.inobit_filetype, { buf = content_win.bufnr })
+  -- vim.api.nvim_set_option_value("filetype", vim.g.inobit_filetype, { buf = input_win.bufnr })
+  -- vim.api.nvim_set_option_value("filetype", vim.g.inobit_filetype, { buf = content_win.bufnr })
 
   -- push win stack
   M.WinStack:push(input_win.winid, cur_win)
