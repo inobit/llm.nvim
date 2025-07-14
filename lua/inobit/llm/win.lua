@@ -277,6 +277,11 @@ M.ChatWin.__index = M.ChatWin
 ---@param close_prev_handler? fun()
 ---@param close_post_handler? fun()
 function M.ChatWin:_register_close_chat_win(close_prev_handler, close_post_handler)
+  for _, float in pairs(self.floats) do
+    vim.keymap.set({ "n" }, "q", function()
+      vim.api.nvim_win_close(float.winid, true)
+    end, { buffer = float.bufnr, noremap = true, silent = true })
+  end
   register_close_for_wins(self.id, vim.tbl_values(self.floats), false, close_prev_handler, close_post_handler)
 end
 
@@ -431,6 +436,11 @@ end
 ---@param close_prev_handler fun()
 ---@param close_post_handler fun()
 function M.PickerWin:_register_close_picker_win(close_prev_handler, close_post_handler)
+  for _, float in pairs(self.floats) do
+    vim.keymap.set({ "n" }, "q", function()
+      vim.api.nvim_win_close(float.winid, true)
+    end, { buffer = float.bufnr, noremap = true, silent = true })
+  end
   register_close_for_wins(self.id, vim.tbl_values(self.floats), true, close_prev_handler, close_post_handler)
 end
 
