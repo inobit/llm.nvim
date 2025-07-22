@@ -347,7 +347,9 @@ function Chat:_response_handler(
     return
   end
 
-  local chunk = res:match "^data:%s(.+)$"
+  --TODO: handle chunk should be done by server
+
+  local chunk = self.server:handler_stream_chunk(res)
 
   -- not match normal response
   if chunk == nil then
@@ -360,35 +362,30 @@ function Chat:_response_handler(
     return
   end
 
-  -- trying to parse chunk
-  _, chunk = pcall(vim.json.decode, chunk)
-  if chunk == nil then
-    parse_error(string.format("parse error: %s", res))
+  if type(chunk) == "string" then
+    parse_error(chunk)
     return
   end
 
-  local reasoning_content_key = self.server:get_reasoning_content_key()
-
   -- handle chunk
-  if chunk.choices and chunk.choices[1] and chunk.choices[1].delta then
-    if chunk.choices[1].delta[reasoning_content_key] and chunk.choices[1].delta[reasoning_content_key] ~= vim.NIL then
+  if type(chunk) == "table" then
+    if chunk.reasoning_content then
       -- update reasoning message
-      response_reasoning_message.role = chunk.choices[1].delta.role or response_reasoning_message.role
-      local cleaned_str = chunk.choices[1].delta[reasoning_content_key]:gsub("\n\n", "\n")
-      response_reasoning_message.reasoning_content = response_reasoning_message.reasoning_content .. cleaned_str
+      response_reasoning_message.role = chunk.role or response_reasoning_message.role
+      response_reasoning_message.reasoning_content = response_reasoning_message.reasoning_content
+        .. chunk.reasoning_content
       -- write reasoning content to response buf
-      self:_write_reason_text_to_response(cleaned_str, start_think)
+      self:_write_reason_text_to_response(chunk.reasoning_content, start_think)
     else
       if start_think.in_line then
         self:_update_thinking_head(start_think.in_line)
         start_think.in_line = nil
       end
       -- update response message
-      response_message.role = chunk.choices[1].delta.role or response_message.role
-      local cleaned_str = chunk.choices[1].delta.content:gsub("\n\n", "\n")
-      response_message.content = response_message.content .. cleaned_str
+      response_message.role = chunk.role or response_message.role
+      response_message.content = response_message.content .. chunk.content
       -- write response content to response buf
-      self:_write_answer_text_to_response(cleaned_str, start_answer, start_think)
+      self:_write_answer_text_to_response(chunk.content, start_answer, start_think)
     end
   end
 end

@@ -278,6 +278,33 @@ function Server:request(opts)
   end
 end
 
+---handle stream chunk, common mode(openai mode)
+---@param response string
+---@return llm.session.Message | string | nil
+function Server:handler_stream_chunk(response)
+  local chunk = response:match "^data:%s(.+)$"
+  if chunk == nil or chunk == "[DONE]" then
+    return chunk
+  end
+  -- trying to parse chunk
+  _, chunk = pcall(vim.json.decode, chunk)
+  if chunk == nil then
+    return string.format("parse error: %s", response)
+  end
+  if chunk.choices and chunk.choices[1] and chunk.choices[1].delta then
+    local reasoning_content_key = self:get_reasoning_content_key()
+    local message = {}
+    local delta = chunk.choices[1].delta
+    message.role = delta.role
+    if delta[reasoning_content_key] and delta[reasoning_content_key] ~= vim.NIL then
+      message.reasoning_content = delta[reasoning_content_key]:gsub("\n\n", "\n")
+    else
+      message.content = delta.content:gsub("\n\n", "\n")
+    end
+    return message
+  end
+end
+
 function ServerManager:set_default_server()
   local default_server = config.options.default_server
   local default_chat_server = config.options.default_chat_server or config.options.default_server
