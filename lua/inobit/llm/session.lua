@@ -118,6 +118,10 @@ end
 
 --- save current session and session index
 function Session:save()
+  -- when session is deleted,it can't be saved when it hasn't been recycled yet
+  if not SessionManager.session_list[self.id] then
+    return
+  end
   if #self.content == 0 then
     notify.warn("empty session does not need to be saved.", string.format("session %s is empty.", self.id))
     return
