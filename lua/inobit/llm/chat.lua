@@ -72,6 +72,14 @@ function ChatManager:new(session)
   end
 end
 
+---@param session llm.SessionIndex
+function ChatManager:delete_chat(session)
+  ChatManager.chats[session.id] = nil
+  if self.last_used_chat and self.last_used_chat.session.id == session.id then
+    self.last_used_chat = nil
+  end
+end
+
 ---@param exists_chat? llm.Chat
 ---@param exists_session? llm.Session
 ---@return llm.Chat

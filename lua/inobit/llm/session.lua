@@ -236,8 +236,9 @@ function SessionManager:get_selected_session(selected)
   return self:get_session(session_index.id)
 end
 
----@param callback? fun(session: llm.Session)
-function SessionManager:open_selector(callback)
+---@param select_callback? fun(session: llm.Session)
+---@param delete_callback? fun(session: llm.SessionIndex)
+function SessionManager:open_selector(select_callback, delete_callback)
   local picker = win.PickerWin:new {
     title = "sessions",
     data_filter_wraper = function()
@@ -250,13 +251,13 @@ function SessionManager:open_selector(callback)
     enter_handler = function(selected)
       local session = self:get_selected_session(selected)
       if session then
-        if callback then
-          callback(session)
+        if select_callback then
+          select_callback(session)
         end
       end
     end,
   }
-  self:_register_operator_keymap(picker.floats.input, picker.floats.content, picker.refresh_data)
+  self:_register_operator_keymap(picker.floats.input, picker.floats.content, picker.refresh_data, delete_callback)
 end
 
 -- <d> delete
@@ -265,7 +266,8 @@ end
 ---@param input_win llm.win.FloatingWin
 ---@param content_win llm.win.FloatingWin
 ---@param refresh fun()
-function SessionManager:_register_operator_keymap(input_win, content_win, refresh)
+---@param delete_callback? fun(session: llm.SessionIndex)
+function SessionManager:_register_operator_keymap(input_win, content_win, refresh, delete_callback)
   vim.keymap.set("n", "d", function()
     local line = util.get_current_line(content_win.bufnr, content_win.winid)
     if line then
@@ -273,6 +275,9 @@ function SessionManager:_register_operator_keymap(input_win, content_win, refres
       vim.ui.input({ prompt = "delete the session?(Y/N): " }, function(input)
         if input and input:lower() == "y" then
           session_index:delete()
+          if delete_callback then
+            delete_callback(session_index)
+          end
           refresh()
         end
       end)

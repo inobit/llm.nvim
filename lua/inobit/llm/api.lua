@@ -21,6 +21,8 @@ end
 M.open_session_selector = function()
   SessionManager:open_selector(function(session)
     ChatManager:new(session)
+  end, function(session)
+    ChatManager:delete_chat(session)
   end)
 end
 
