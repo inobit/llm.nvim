@@ -347,8 +347,6 @@ function Chat:_response_handler(
     return
   end
 
-  --TODO: handle chunk should be done by server
-
   local chunk = self.server:handler_stream_chunk(res)
 
   -- not match normal response
