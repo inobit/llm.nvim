@@ -287,8 +287,9 @@ function Server:handler_stream_chunk(response)
     return chunk
   end
   -- trying to parse chunk
-  _, chunk = pcall(vim.json.decode, chunk)
-  if chunk == nil then
+  local status = false
+  status, chunk = pcall(vim.json.decode, chunk)
+  if not status then
     return string.format("parse error: %s", response)
   end
   if chunk.choices and chunk.choices[1] and chunk.choices[1].delta then
