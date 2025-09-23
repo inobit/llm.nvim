@@ -101,19 +101,7 @@ end
 
 ---@return string
 function M.get_inner_text()
-  -- save current location
-  local cursor_pos = vim.api.nvim_win_get_cursor(0)
-
-  -- select under the cursor iw (inner word)
-  vim.cmd "normal! yiw"
-
-  -- retrieve the copied text
-  local text = vim.fn.getreg '"'
-
-  -- restore cursor position
-  vim.api.nvim_win_set_cursor(0, cursor_pos)
-
-  return text
+  return vim.fn.expand "<cword>"
 end
 
 ---@param text string
