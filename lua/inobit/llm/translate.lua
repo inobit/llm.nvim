@@ -256,7 +256,7 @@ function M.translate(translate_type, specification, from, text, callback, on_err
           if specification == "simple" or result.alternatives == nil or #result.alternatives == 0 then
             result = result.data
           else
-            local style = { result.data, "备选:" }
+            local style = { result.data, "", "alternatives: " }
             result.alternatives = vim.tbl_map(function(str)
               return "- " .. str
             end, result.alternatives)
