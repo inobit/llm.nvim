@@ -45,6 +45,7 @@ M.translate_in_cmdline = function(text, type)
 end
 
 M.translate_in_buffer = translate.translate_in_buffer
+M.translate_in_lsp = translate.translate_in_lsp
 
 M.is_translating = translate.get_translate_status
 

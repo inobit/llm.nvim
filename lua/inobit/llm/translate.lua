@@ -207,7 +207,8 @@ end
 ---@param from text_from
 ---@param text string
 ---@param callback fun(content: string,from?: text_from)
-function M.translate(translate_type, specification, from, text, callback)
+---@param on_error? fun(err: llm.server.Error)
+function M.translate(translate_type, specification, from, text, callback, on_error)
   -- check text
   if util.empty_str(text) then
     return
@@ -271,6 +272,7 @@ function M.translate(translate_type, specification, from, text, callback)
     spinner:stop()
   end
   opts.callback = exit_callback
+  opts.on_error = on_error
   if ServerManager.translate_server:request(opts) ~= nil then
     spinner:start()
   end
@@ -383,6 +385,27 @@ function M.translate_in_buffer(replace, type)
   end
   text = vim.trim(text)
   M.translate(type, detect_format(replace, text), "buffer", text, vim.schedule_wrap(callback))
+end
+
+---null-ls hover
+---@param done fun(result?: table)
+---@param type? translate_type
+function M.translate_in_lsp(done, type)
+  local text
+  if vim.api.nvim_get_mode().mode == "n" then
+    text = util.get_inner_text()
+  else
+    text = util.get_visual_text()
+  end
+  if not type then
+    type = util.is_english(text) and "E2Z" or "Z2E"
+  end
+  text = vim.trim(text)
+  M.translate(type, detect_format(false, text), "buffer", text, function(result)
+    done { result }
+  end, function()
+    done()
+  end)
 end
 
 ---@param text string
