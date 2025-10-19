@@ -272,7 +272,12 @@ function M.translate(translate_type, specification, from, text, callback, on_err
     spinner:stop()
   end
   opts.callback = exit_callback
-  opts.on_error = on_error
+  opts.on_error = function(err)
+    spinner:stop()
+    if on_error then
+      on_error(err)
+    end
+  end
   if ServerManager.translate_server:request(opts) ~= nil then
     spinner:start()
   end
