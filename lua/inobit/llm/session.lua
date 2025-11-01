@@ -134,6 +134,7 @@ function Session:save()
   notify.info("session saved.", string.format("session %s saved.", self.name))
 end
 
+---filter the thinking messages
 ---@return llm.session.Message[]
 function Session:multi_round_filter()
   return vim.tbl_filter(function(message)

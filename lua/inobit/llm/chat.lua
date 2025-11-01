@@ -6,6 +6,9 @@ local win = require "inobit.llm.win"
 local hl = require "inobit.llm.highlights"
 local Spinner = require("inobit.llm.spinner").FloatSpinner
 
+---@alias llm.Chat.BoolRef boolean
+---@alias llm.Chat.BoolPayload {value: boolean, payload: any}
+
 ---@class llm.chat.ActiveChatBuffer
 ---@field input_bufnr? integer
 ---@field response_bufnr? integer
@@ -16,6 +19,11 @@ local Spinner = require("inobit.llm.spinner").FloatSpinner
 ---@field server llm.Server
 ---@field requesting? Job
 ---@field spinner llm.Spinner
+---@field start_think llm.Chat.BoolPayload
+---@field start_answer llm.Chat.BoolRef
+---@field has_think_tag llm.Chat.BoolPayload
+---@field current_response llm.session.Message
+---@field current_response_reasoning llm.session.Message
 local Chat = {}
 Chat.__index = Chat
 
@@ -267,8 +275,9 @@ function Chat:_build_input_render_style(input_lines)
 end
 
 ---@private
----@param head_line integer
-function Chat:_update_thinking_head(head_line)
+function Chat:_update_thinking_head()
+  local head_line = tonumber(self.start_think.payload)
+  assert(head_line, "start_think.payload is nil or not a number")
   vim.api.nvim_buf_set_lines(
     self.win.floats.response.bufnr,
     head_line,
@@ -300,18 +309,17 @@ end
 
 ---@private
 ---@param content string
----@param start_think {value: boolean, in_line: integer}
-function Chat:_write_reason_text_to_response(content, start_think)
+function Chat:_write_reason_text_to_response(content)
   local bufnr = self.win.floats.response.bufnr
   local row, col = util.get_last_char_position(bufnr)
   -- thinking content style
   content = content:gsub("\n", "\n> ")
   -- thinking head style
-  if start_think.value then
+  if self.start_think.value then
     content = "\n> [!Tip] Thinking\n> " .. content
-    start_think.value = false
+    self.start_think.value = false
     -- save thinking head line
-    start_think.in_line = row
+    self.start_think.payload = row
   end
   local lines = vim.split(content, "\n")
   vim.api.nvim_buf_set_text(bufnr, row - 1, col, row - 1, col, lines)
@@ -320,13 +328,11 @@ end
 
 ---@private
 ---@param content string
----@param start_answer {value: boolean}
----@param start_think {value: boolean}
-function Chat:_write_answer_text_to_response(content, start_answer, start_think)
-  if start_answer.value then
+function Chat:_write_answer_text_to_response(content)
+  if self.start_answer then
     -- new line
-    content = (start_think.value and "\n" or "\n\n") .. content
-    start_answer.value = false
+    content = (self.start_think.value and "\n" or "\n\n") .. content
+    self.start_answer = false
   end
   local bufnr = self.win.floats.response.bufnr
   local row, col = util.get_last_char_position(bufnr)
@@ -338,19 +344,7 @@ end
 ---handle response(stream mode)
 ---@private
 ---@param res string
----@param response_message llm.session.Message
----@param response_reasoning_message llm.session.Message
----@param start_think {value: boolean, in_line: integer}
----@param start_answer {value: boolean}
----@param parse_error fun(string)
-function Chat:_response_handler(
-  res,
-  response_message,
-  response_reasoning_message,
-  start_think,
-  start_answer,
-  parse_error
-)
+function Chat:_response_handler(res)
   if not res or res == "" then
     return
   end
@@ -359,7 +353,7 @@ function Chat:_response_handler(
 
   -- not match normal response
   if chunk == nil then
-    parse_error(res)
+    self:parse_error(res)
     return
   end
 
@@ -369,7 +363,7 @@ function Chat:_response_handler(
   end
 
   if type(chunk) == "string" then
-    parse_error(chunk)
+    self:parse_error(chunk)
     return
   end
 
@@ -377,27 +371,27 @@ function Chat:_response_handler(
   if type(chunk) == "table" then
     if chunk.reasoning_content then
       -- update reasoning message
-      response_reasoning_message.role = chunk.role or response_reasoning_message.role
-      response_reasoning_message.reasoning_content = response_reasoning_message.reasoning_content
+      self.current_response_reasoning.role = chunk.role or self.current_response_reasoning.role
+      self.current_response_reasoning.reasoning_content = self.current_response_reasoning.reasoning_content
         .. chunk.reasoning_content
       -- write reasoning content to response buf
-      self:_write_reason_text_to_response(chunk.reasoning_content, start_think)
+      self:_write_reason_text_to_response(chunk.reasoning_content)
     else
-      if start_think.in_line then
-        self:_update_thinking_head(start_think.in_line)
-        start_think.in_line = nil
+      if self.start_think.payload then
+        self:_update_thinking_head()
+        self.start_think.payload = nil
       end
       -- update response message
-      response_message.role = chunk.role or response_message.role
-      response_message.content = response_message.content .. chunk.content
+      self.current_response.role = chunk.role or self.current_response.role
+      self.current_response.content = self.current_response.content .. chunk.content
       -- write response content to response buf
-      self:_write_answer_text_to_response(chunk.content, start_answer, start_think)
+      self:_write_answer_text_to_response(chunk.content)
     end
   end
 end
 
 ---@private
-function Chat:_handle_session()
+function Chat:_clean_session()
   -- handle last 2 elements
   local len = #self.session.content
   if self.session.content[len].content and self.session.content[len].content == "" then
@@ -429,11 +423,81 @@ end
 
 ---@private
 function Chat:_after_stop()
-  self:_handle_session()
+  self:_clean_session()
   self.spinner:stop()
   self:_remove_stop_request_keymap()
   self:_register_submit_keymap()
   self:_close(0)
+end
+
+function Chat:_init_response_status()
+  self.start_think = { value = true }
+  self.start_answer = true
+  self.has_think_tag = { value = false }
+
+  -- construct response message and reasoning message
+  self.current_response = { role = "assistant", content = "" }
+  self.current_response_reasoning = { role = "assistant", reasoning_content = "" }
+end
+
+---@param error llm.server.Error
+function Chat:on_error(error)
+  local header = "[!CAUTION] Error!"
+  if error.exit == 1000 or error.exit == 1001 then
+    header = "[!WARNING] Warning!"
+  end
+  local err = string.format("%s%s%s", header, "\n", error.message)
+  local err_lines = vim.split(err, "\n")
+  err_lines = vim
+    .iter(err_lines)
+    :map(function(line)
+      return "> " .. line
+    end)
+    :totable()
+  table.insert(err_lines, 1, "")
+  self:_write_lines_to_response(err_lines)
+  self:_after_stop()
+end
+
+---@param error string
+function Chat:parse_error(error)
+  -- Comment lines in event streams that begin with a colon
+  if error:match "^:%s" then
+    -- maybe keep alive message,just ignore
+    return
+  end
+  ---@type llm.server.Error
+  local err_obj = {
+    exit = 1002,
+    message = error,
+    stderr = "",
+  }
+  if error:match "^{.*}$" then
+    local status, msg = pcall(vim.json.decode, error)
+    if status then
+      msg = msg.error and (msg.error.message or msg.error) or msg
+      err_obj.message = type(msg) == "string" and msg or vim.inspect(msg)
+    end
+  end
+  self:on_error(err_obj)
+end
+
+---on stream response
+---@param err string
+---@param data string
+function Chat:on_stream(err, data)
+  -- handle error
+  if err then
+    self:on_error { message = err, stderr = "", exit = 0 }
+    -- handle response data
+  else
+    self:_response_handler(data)
+  end
+end
+
+function Chat:on_exit()
+  self:_after_stop()
+  self:_add_round_separator()
 end
 
 ---@private
@@ -443,73 +507,8 @@ function Chat:_input_enter_handler()
     return
   end
 
-  -- construct response message and reasoning message
-  local response_message = { role = "assistant", content = "" }
-  local response_reasoning_message = { role = "assistant", reasoning_content = "" }
-
-  -- start response sign
-  local start_think = { value = true }
-  local start_answer = { value = true }
-
-  ---@param error llm.server.Error
-  local function on_error(error)
-    local header = "[!CAUTION] Error!"
-    if error.exit == 1000 or error.exit == 1001 then
-      header = "[!WARNING] Warning!"
-    end
-    local err = string.format("%s%s%s", header, "\n", error.message)
-    local err_lines = vim.split(err, "\n")
-    err_lines = vim
-      .iter(err_lines)
-      :map(function(line)
-        return "> " .. line
-      end)
-      :totable()
-    table.insert(err_lines, 1, "")
-    self:_write_lines_to_response(err_lines)
-    self:_after_stop()
-  end
-
-  ---@param error string
-  local function parse_error(error)
-    -- Comment lines in event streams that begin with a colon
-    if error:match "^:%s" then
-      -- maybe keep alive message,just ignore
-      return
-    end
-    ---@type llm.server.Error
-    local err_obj = {
-      exit = 1002,
-      message = error,
-      stderr = "",
-    }
-    if error:match "^{.*}$" then
-      local status, msg = pcall(vim.json.decode, error)
-      if status then
-        msg = msg.error and (msg.error.message or msg.error) or msg
-        err_obj.message = type(msg) == "string" and msg or vim.inspect(msg)
-      end
-    end
-    on_error(err_obj)
-  end
-
-  ---on stream response
-  ---@param err string
-  ---@param data string
-  local function on_stream(err, data)
-    -- handle error
-    if err then
-      on_error { message = err, stderr = "", exit = 0 }
-    -- handle response data
-    else
-      self:_response_handler(data, response_message, response_reasoning_message, start_think, start_answer, parse_error)
-    end
-  end
-
-  local function on_exit()
-    self:_after_stop()
-    self:_add_round_separator()
-  end
+  -- init response sign at each chat turn
+  self:_init_response_status()
 
   ---construct input message
   ---@type llm.session.Message
@@ -538,9 +537,12 @@ function Chat:_input_enter_handler()
   local opts = self
     .server--[[@as llm.OpenAIServer]]
     :build_request_opts(send_content, { stream = true })
-  opts.callback = on_exit
-  opts.stream = on_stream
-  opts.on_error = on_error
+
+  -- stylua: ignore start
+  opts.callback = function() self:on_exit() end
+  opts.stream = function(err, data) self:on_stream(err, data) end
+  opts.on_error = function(err) self:on_error(err) end
+  -- stylua: ignore end
 
   -- send request,force stream mode
   local job = self.server:request(opts)
@@ -554,9 +556,9 @@ function Chat:_input_enter_handler()
   -- add input to session
   self.session:add_message(input_message)
   -- add reasoning message to session
-  self.session:add_message(response_reasoning_message)
+  self.session:add_message(self.current_response_reasoning)
   -- add response message to session
-  self.session:add_message(response_message)
+  self.session:add_message(self.current_response)
   -- clear input
   vim.api.nvim_buf_set_lines(self.win.floats.input.bufnr, 0, -1, false, {})
   -- write input to response buf
