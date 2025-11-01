@@ -8,6 +8,7 @@ local Spinner = require("inobit.llm.spinner").FloatSpinner
 
 ---@alias llm.Chat.BoolRef boolean
 ---@alias llm.Chat.BoolPayload {value: boolean, payload: any}
+---@alias llm.Chat.ThinkTag {is: boolean, end_think: boolean, payload?: string}
 
 ---@class llm.chat.ActiveChatBuffer
 ---@field input_bufnr? integer
@@ -21,7 +22,8 @@ local Spinner = require("inobit.llm.spinner").FloatSpinner
 ---@field spinner llm.Spinner
 ---@field start_think llm.Chat.BoolPayload
 ---@field start_answer llm.Chat.BoolRef
----@field has_think_tag llm.Chat.BoolPayload
+---@field think_tag llm.Chat.ThinkTag
+---@field no_first_res_in_turn boolean
 ---@field current_response llm.session.Message
 ---@field current_response_reasoning llm.session.Message
 local Chat = {}
@@ -349,7 +351,7 @@ function Chat:_response_handler(res)
     return
   end
 
-  local chunk = self.server:handler_stream_chunk(res)
+  local chunk = self.server:handle_stream_chunk(res, self)
 
   -- not match normal response
   if chunk == nil then
@@ -431,9 +433,10 @@ function Chat:_after_stop()
 end
 
 function Chat:_init_response_status()
-  self.start_think = { value = true }
+  self.start_think = { value = true, payload = nil }
   self.start_answer = true
-  self.has_think_tag = { value = false }
+  self.think_tag = { is = false, end_think = false, payload = nil }
+  self.no_first_res_in_turn = false
 
   -- construct response message and reasoning message
   self.current_response = { role = "assistant", content = "" }

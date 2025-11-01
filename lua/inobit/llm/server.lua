@@ -280,8 +280,9 @@ end
 
 ---handle stream chunk, common mode(openai mode)
 ---@param response string
+---@param chat llm.Chat
 ---@return llm.session.Message | string | nil
-function Server:handler_stream_chunk(response)
+function Server:handle_stream_chunk(response, chat)
   local chunk = response:match "^data:%s(.+)$"
   if chunk == nil or chunk == "[DONE]" then
     return chunk
@@ -297,11 +298,57 @@ function Server:handler_stream_chunk(response)
     local message = {}
     local delta = chunk.choices[1].delta
     message.role = delta.role
-    if delta[reasoning_content_key] and delta[reasoning_content_key] ~= vim.NIL then
-      message.reasoning_content = delta[reasoning_content_key]:gsub("\n\n", "\n")
-    else
-      message.content = delta.content:gsub("\n\n", "\n")
+    local think_tag = chat.think_tag
+
+    -- match think tag in first response
+    if not chat.no_first_res_in_turn and delta.content:match "^<think>" then
+      think_tag.is = true
     end
+
+    -- handle response with think tag
+    if think_tag.is then
+      if not chat.no_first_res_in_turn then
+        -- remove think begin tag
+        message.reasoning_content = delta.content:gsub("^<think>", "")
+      else
+        -- handle first </think> tag
+        if delta.content:match "</think>" and not think_tag.end_think then
+          -- example: xxx</think>yyy
+          message.reasoning_content = delta.content:match "(.*)</think>" -- get xxx
+          think_tag.payload = delta.content:match "</think>(.*)" -- save yyy
+          think_tag.end_think = true
+        else
+          -- handle think content
+          if not think_tag.end_think then
+            message.reasoning_content = delta.content
+          else
+            if think_tag.payload then -- concat yyy
+              message.content = think_tag.payload .. delta.content
+              think_tag.payload = nil
+            else
+              message.content = delta.content
+            end
+          end
+        end
+      end
+    -- hanlde response without think tag
+    else
+      if delta[reasoning_content_key] and delta[reasoning_content_key] ~= vim.NIL then
+        message.reasoning_content = delta[reasoning_content_key]
+      else
+        message.content = delta.content
+      end
+    end
+
+    if message.content then
+      message.content = message.content:gsub("\n\n", "\n")
+    end
+    if message.reasoning_content then
+      message.reasoning_content = message.reasoning_content:gsub("\n\n", "\n")
+    end
+
+    chat.no_first_res_in_turn = true
+
     return message
   end
 end
