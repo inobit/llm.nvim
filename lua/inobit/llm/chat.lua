@@ -391,7 +391,7 @@ function Chat:_response_handler(res)
 end
 
 ---@private
-function Chat:_clean_session()
+function Chat:_clean_current_request_turn()
   -- handle last 2 elements
   local len = #self.session.content
   if self.session.content[len].content and self.session.content[len].content == "" then
@@ -423,7 +423,7 @@ end
 
 ---@private
 function Chat:_after_stop()
-  self:_clean_session()
+  self:_clean_current_request_turn()
   self.spinner:stop()
   self:_remove_stop_request_keymap()
   self:_register_submit_keymap()
