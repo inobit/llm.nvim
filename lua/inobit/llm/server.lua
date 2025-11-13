@@ -293,7 +293,7 @@ function Server:handle_stream_chunk(response, chat)
   if not status then
     return string.format("parse error: %s", response)
   end
-  if chunk.choices and chunk.choices[1] and chunk.choices[1].delta then
+  if chunk.choices and chunk.choices ~= vim.NIL and chunk.choices[1] and chunk.choices[1].delta then
     local reasoning_content_key = self:get_reasoning_content_key()
     local message = {}
     local delta = chunk.choices[1].delta
@@ -350,6 +350,8 @@ function Server:handle_stream_chunk(response, chat)
     chat.no_first_res_in_turn = true
 
     return message
+  else
+    return string.format("parse error: %s", vim.inspect(chunk))
   end
 end
 
