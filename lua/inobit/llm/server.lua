@@ -301,7 +301,7 @@ function Server:handle_stream_chunk(response, chat)
     local think_tag = chat.think_tag
 
     -- match think tag in first response
-    if not chat.no_first_res_in_turn and delta.content:match "^<think>" then
+    if not chat.no_first_res_in_turn and delta.content ~= vim.NIL and delta.content:match "^<think>" then
       think_tag.is = true
     end
 
