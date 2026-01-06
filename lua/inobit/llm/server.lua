@@ -294,15 +294,25 @@ function Server:handle_stream_chunk(response, chat)
     return string.format("parse error: %s", response)
   end
   if chunk.choices and chunk.choices ~= vim.NIL and chunk.choices[1] and chunk.choices[1].delta then
-    local reasoning_content_key = self:get_reasoning_content_key()
-    local message = {}
     local delta = chunk.choices[1].delta
-    message.role = delta.role
     local think_tag = chat.think_tag
 
     -- match think tag in first response
-    if not chat.no_first_res_in_turn and delta.content ~= vim.NIL and delta.content:match "^<think>" then
-      think_tag.is = true
+    if not chat.no_first_res_in_turn then
+      if util.empty_str(delta.content) then
+        return "[IGNORE]" -- just ignore
+      end
+      if delta.content:match "^<think>" then
+        think_tag.is = true
+      end
+    end
+
+    local reasoning_content_key = self:get_reasoning_content_key()
+    local message = {}
+    if util.empty_str(delta.role, false) then
+      message.role = nil
+    else
+      message.role = delta.role
     end
 
     -- handle response with think tag
@@ -312,7 +322,7 @@ function Server:handle_stream_chunk(response, chat)
         message.reasoning_content = delta.content:gsub("^<think>", "")
       else
         -- handle first </think> tag
-        if delta.content:match "</think>" and not think_tag.end_think then
+        if not think_tag.end_think and not util.empty_str(delta.content) and delta.content:match "</think>" then
           -- example: xxx</think>yyy
           message.reasoning_content = delta.content:match "(.*)</think>" -- get xxx
           think_tag.payload = delta.content:match "</think>(.*)" -- save yyy
@@ -323,6 +333,9 @@ function Server:handle_stream_chunk(response, chat)
             message.reasoning_content = delta.content
           else
             if think_tag.payload then -- concat yyy
+              if util.empty_str(delta.content, false) then
+                delta.content = ""
+              end
               message.content = think_tag.payload .. delta.content
               think_tag.payload = nil
             else
@@ -333,18 +346,20 @@ function Server:handle_stream_chunk(response, chat)
       end
     -- hanlde response without think tag
     else
-      if delta[reasoning_content_key] and delta[reasoning_content_key] ~= vim.NIL then
-        message.reasoning_content = delta[reasoning_content_key]
-      else
-        message.content = delta.content
-      end
+      message.reasoning_content = delta[reasoning_content_key]
+      message.content = delta.content
     end
 
-    if message.content then
-      message.content = message.content:gsub("\n\n", "\n")
-    end
-    if message.reasoning_content then
+    if util.empty_str(message.reasoning_content, false) then
+      message.reasoning_content = nil
+    else
       message.reasoning_content = message.reasoning_content:gsub("\n\n", "\n")
+    end
+
+    if util.empty_str(message.content, false) then
+      message.content = ""
+    else
+      message.content = message.content:gsub("\n\n", "\n")
     end
 
     chat.no_first_res_in_turn = true

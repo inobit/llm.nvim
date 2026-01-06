@@ -360,7 +360,7 @@ function Chat:_response_handler(res)
   end
 
   -- response end
-  if chunk == "[DONE]" then
+  if chunk == "[DONE]" or chunk == "[IGNORE]" then
     return
   end
 
