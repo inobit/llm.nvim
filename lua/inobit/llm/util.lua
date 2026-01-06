@@ -8,9 +8,19 @@ function M.get_last_char_position(bufnr)
   return last_line, last_char_col
 end
 
----@param str string
-function M.empty_str(str)
-  return str == nil or str:match "^%s*$" ~= nil
+---@param str any
+---@param strict? boolean
+---@return boolean
+function M.empty_str(str, strict)
+  if strict == nil then
+    strict = true
+  end
+  local is_nil = str == vim.NIL or str == nil
+  if strict then
+    return is_nil or tostring(str):match "^%s*$" ~= nil
+  else
+    return is_nil
+  end
 end
 
 -- Decoding UTF-8 Byte Sequences LuaJIT does not have a built-in UTF8 module.
