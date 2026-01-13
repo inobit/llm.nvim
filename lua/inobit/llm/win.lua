@@ -417,6 +417,8 @@ function M.PickerWin:_register_picker_line_move()
       next_line = cur_line[1] + 1
     end
     vim.api.nvim_win_set_cursor(self.floats.content.winid, { next_line, 0 })
+    -- BUG: the cursor sometimes does't move in wezterm mux mode, must refresh every time
+    vim.api.nvim_set_option_value("cursorline", true, { win = self.floats.content.winid })
   end, { buffer = self.floats.input.bufnr })
 
   vim.keymap.set("n", "k", function()
@@ -429,6 +431,8 @@ function M.PickerWin:_register_picker_line_move()
       next_line = cur_line[1] - 1
     end
     vim.api.nvim_win_set_cursor(self.floats.content.winid, { next_line, 0 })
+    -- BUG: the cursor sometimes does't move in wezterm mux mode, must refresh every time
+    vim.api.nvim_set_option_value("cursorline", true, { win = self.floats.content.winid })
   end, { buffer = self.floats.input.bufnr })
 end
 
