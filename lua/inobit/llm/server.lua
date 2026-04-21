@@ -365,6 +365,9 @@ function Server:handle_stream_chunk(response, chat)
     chat.no_first_res_in_turn = true
 
     return message
+  elseif chunk.usage then
+    -- Some APIs send a final chunk with usage info but empty choices
+    return "[IGNORE]"
   else
     return string.format("parse error: %s", vim.inspect(chunk))
   end
