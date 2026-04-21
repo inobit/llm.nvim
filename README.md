@@ -90,6 +90,12 @@ The plugin works out of the box with sensible defaults. To customize, pass optio
     vsplit_win = {
       width_percentage = 0.45,  -- Width of the chat panel (0.2 - 0.7)
     },
+
+    -- Navigation keymaps for jumping between questions in response window
+    nav = {
+      next_question = "]q",  -- Jump to next question
+      prev_question = "[q",  -- Jump to previous question (supports wrap-around)
+    },
     servers = {
       -- Example: Add more OpenRouter models
       {
@@ -200,11 +206,13 @@ end
 
 ### Chat Window Keymaps
 
-| Key     | Action               |
-| ------- | -------------------- |
-| `<C-C>` | End current session  |
-| `<C-S>` | Save current session |
-| `<C-N>` | Create new session   |
+| Key       | Action                           |
+| --------- | -------------------------------- |
+| `<C-C>`   | End current session              |
+| `<C-S>`   | Save current session             |
+| `<C-N>`   | Create new session               |
+| `[q`      | Go to previous question (wrap)   |
+| `]q`      | Go to next question (wrap)       |
 
 ### Session Picker Keymaps
 
