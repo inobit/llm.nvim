@@ -42,11 +42,15 @@ local Path = require "plenary.path"
 ---@field content_height_percentage number
 ---@field winblend integer
 
+---@class llm.VSplitWinOptions
+---@field width_percentage number
+
 ---@class llm.Config
 ---@field servers table<string, llm.server.ServerOptions>
 ---@field default_server string
 ---@field default_chat_server? string
 ---@field default_translate_server? string
+---@field chat_layout "float" | "vsplit"
 ---@field loading_mark string
 ---@field user_prompt string
 ---@field question_hi string | vim.api.keyset.highlight
@@ -56,6 +60,7 @@ local Path = require "plenary.path"
 ---@field chat_win llm.WinOptions
 ---@field session_picker_win llm.WinOptions
 ---@field server_picker_win llm.WinOptions
+---@field vsplit_win llm.VSplitWinOptions
 
 ---@return llm.config.ServerOptions[]
 local function default_servers()
@@ -82,6 +87,7 @@ function M.defaults()
   return {
     -- server@model
     default_server = "OpenRouter@openai/gpt-4.5",
+    chat_layout = "float",
     loading_mark = "**Generating response ...**",
     user_prompt = "❯",
     question_hi = { fg = "#1abc9c" },
@@ -104,6 +110,9 @@ function M.defaults()
       input_height = 1,
       content_height_percentage = 0.2,
       winblend = 5,
+    },
+    vsplit_win = {
+      width_percentage = 0.45,
     },
   }
 end
@@ -161,6 +170,7 @@ end
 ---@field default_server? string
 ---@field default_chat_server? string
 ---@field default_translate_server? string
+---@field chat_layout? "float" | "vsplit"
 ---@field loading_mark? string
 ---@field user_prompt? string
 ---@field question_hi? string | vim.api.keyset.highlight group name or options
@@ -171,6 +181,7 @@ end
 ---@field chat_win? llm.WinOptions
 ---@field session_picker_win? llm.WinOptions
 ---@field server_picker_win? llm.WinOptions
+---@field vsplit_win? llm.VSplitWinOptions
 
 ---@param options? llm.SetupOptions
 function M.setup(options)
@@ -178,6 +189,23 @@ function M.setup(options)
   options = options or {}
   local combined = vim.tbl_deep_extend("force", {}, M.defaults(), options)
   combined.servers = install_servers(combined.servers)
+
+  -- Validate chat_layout
+  local valid_layouts = { float = true, vsplit = true }
+  if not valid_layouts[combined.chat_layout] then
+    error("Invalid chat_layout: " .. tostring(combined.chat_layout) .. ". Must be 'float' or 'vsplit'")
+  end
+
+  -- Clamp vsplit_win width_percentage to valid range
+  if combined.vsplit_win and combined.vsplit_win.width_percentage then
+    if combined.vsplit_win.width_percentage > 0.7 then
+      combined.vsplit_win.width_percentage = 0.7
+    end
+    if combined.vsplit_win.width_percentage < 0.2 then
+      combined.vsplit_win.width_percentage = 0.2
+    end
+  end
+
   M.options = combined --[[@as llm.Config]]
 end
 

@@ -34,7 +34,7 @@ function Spinner:_new(frames, frequency)
   return this
 end
 
----@param anchor llm.win.FloatingWin
+---@param anchor llm.win.BaseWin
 ---@param frames? string[]
 ---@param frequency? integer
 function FloatSpinner:new(anchor, frames, frequency)

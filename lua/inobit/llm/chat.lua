@@ -15,7 +15,7 @@ local Spinner = require("inobit.llm.spinner").FloatSpinner
 ---@field response_bufnr? integer
 
 ---@class llm.Chat
----@field win llm.win.ChatWin
+---@field win llm.win.BaseChatWin
 ---@field session llm.Session
 ---@field server llm.Server
 ---@field requesting? Job
@@ -59,8 +59,19 @@ function ChatManager:new(session)
     exists_chat = self.last_used_chat
   end
 
+  -- For vsplit layout, close old windows first to avoid layout conflicts
+  local chat_layout = config.options.chat_layout
+  if chat_layout == "vsplit" and self.last_used_chat and self.last_used_chat ~= exists_chat then
+    local old_response_win = self.last_used_chat.win.wins.response.winid
+    local old_input_win = self.last_used_chat.win.wins.input.winid
+    win.WinStack:delete(old_response_win)
+    win.WinStack:delete(old_input_win)
+    pcall(vim.api.nvim_win_close, old_input_win, true)
+    pcall(vim.api.nvim_win_close, old_response_win, true)
+  end
+
   if exists_chat then
-    if exists_chat ~= self.last_used_chat or not vim.api.nvim_win_is_valid(exists_chat.win.floats.response.winid) then
+    if exists_chat ~= self.last_used_chat or not vim.api.nvim_win_is_valid(exists_chat.win.wins.response.winid) then
       -- exists chat,change the chat's win options
       new_chat = Chat:new(exists_chat)
     end
@@ -70,15 +81,14 @@ function ChatManager:new(session)
   end
 
   if new_chat then
+    -- Close old windows for float layout (vsplit already handled above)
+    if chat_layout ~= "vsplit" and self.last_used_chat and self.last_used_chat ~= new_chat then
+      win.WinStack:delete(self.last_used_chat.win.wins.response.winid)
+      win.WinStack:delete(self.last_used_chat.win.wins.input.winid)
+      self.last_used_chat.win.wins.response:close()
+    end
     self.chats[new_chat.session.id] = new_chat
-    vim.schedule(function()
-      if self.last_used_chat and self.last_used_chat ~= new_chat then
-        win.WinStack:delete(self.last_used_chat.win.floats.response.winid)
-        win.WinStack:delete(self.last_used_chat.win.floats.input.winid)
-        self.last_used_chat.win.floats.response:close()
-      end
-      self.last_used_chat = new_chat
-    end)
+    self.last_used_chat = new_chat
   end
 end
 
@@ -96,22 +106,40 @@ end
 function Chat:new(exists_chat, exists_session)
   local this = exists_chat
   if this then
-    -- update win
-    this.win = win.ChatWin:new {
-      title = this.session.server .. "@" .. this.session.model,
-      input_bufnr = this.win.floats.input.bufnr,
-      response_bufnr = this.win.floats.response.bufnr,
-    }
+    -- update win - choose layout based on config
+    local chat_layout = config.options.chat_layout
+    if chat_layout == "vsplit" then
+      this.win = win.SplitChatWin:new {
+        title = this.session.server .. "@" .. this.session.model,
+        input_bufnr = this.win.wins.input.bufnr,
+        response_bufnr = this.win.wins.response.bufnr,
+      }
+    else
+      this.win = win.ChatWin:new {
+        title = this.session.server .. "@" .. this.session.model,
+        input_bufnr = this.win.wins.input.bufnr,
+        response_bufnr = this.win.wins.response.bufnr,
+      }
+    end
   else
     this = setmetatable({}, Chat)
     this.session = exists_session
       or SessionManager:new_session(ServerManager.chat_server.server, ServerManager.chat_server.model)
     this.server = ServerManager.servers[this.session.server .. "@" .. this.session.model]
-    this.win = win.ChatWin:new {
-      title = this.session.server .. "@" .. this.session.model,
-    }
+
+    -- Choose window type based on config
+    local chat_layout = config.options.chat_layout
+    if chat_layout == "vsplit" then
+      this.win = win.SplitChatWin:new {
+        title = this.session.server .. "@" .. this.session.model,
+      }
+    else
+      this.win = win.ChatWin:new {
+        title = this.session.server .. "@" .. this.session.model,
+      }
+    end
   end
-  this.spinner = Spinner:new(this.win.floats.input)
+  this.spinner = Spinner:new(this.win.wins.input)
   if this.requesting then
     this.spinner:start()
   else
@@ -132,8 +160,8 @@ function Chat:_set_header()
     string.format("- **session name**: %s", self.session.name),
     string.format("- **session id**: %s", self.session.id),
   }
-  if vim.api.nvim_buf_get_lines(self.win.floats.response.bufnr, 0, 1, false)[1] ~= "" then
-    vim.api.nvim_buf_set_lines(self.win.floats.response.bufnr, 0, 4, false, headers)
+  if vim.api.nvim_buf_get_lines(self.win.wins.response.bufnr, 0, 1, false)[1] ~= "" then
+    vim.api.nvim_buf_set_lines(self.win.wins.response.bufnr, 0, 4, false, headers)
   else
     self:_write_lines_to_response(headers)
   end
@@ -142,12 +170,12 @@ end
 
 ---@private
 function Chat:_resume_session()
-  vim.api.nvim_set_current_win(self.win.floats.response.winid)
+  vim.api.nvim_set_current_win(self.win.wins.response.winid)
   self:_render()
   local head_len = self:_set_header()
-  if vim.api.nvim_buf_line_count(self.win.floats.response.bufnr) > head_len + 1 then
+  if vim.api.nvim_buf_line_count(self.win.wins.response.bufnr) > head_len + 1 then
     -- do nothing when the session is not empty
-    vim.api.nvim_set_current_win(self.win.floats.input.winid)
+    vim.api.nvim_set_current_win(self.win.wins.input.winid)
     return
   end
   if not vim.tbl_isempty(self.session.content) then
@@ -175,7 +203,7 @@ function Chat:_resume_session()
       end
     end
   end
-  vim.api.nvim_set_current_win(self.win.floats.input.winid)
+  vim.api.nvim_set_current_win(self.win.wins.input.winid)
 end
 
 ---stop request
@@ -201,7 +229,7 @@ end
 ---use <C-S> to save session
 --WARN: the buffer will be reused, and without rebinding, the reference of 'self' may cause confusion.
 function Chat:_register_stop_and_save_keymap()
-  local bufnrs = { self.win.floats.input.bufnr, self.win.floats.response.bufnr }
+  local bufnrs = { self.win.wins.input.bufnr, self.win.wins.response.bufnr }
   for _, bufnr in ipairs(bufnrs) do
     vim.keymap.set({ "n", "i" }, "<C-C>", function()
       self:_close(1000)
@@ -214,7 +242,7 @@ end
 
 ---@private
 function Chat:_remove_stop_request_keymap()
-  local bufnrs = { self.win.floats.input.bufnr, self.win.floats.response.bufnr }
+  local bufnrs = { self.win.wins.input.bufnr, self.win.wins.response.bufnr }
   for _, bufnr in ipairs(bufnrs) do
     pcall(vim.keymap.del, { "n", "i" }, "<C-C>", { buffer = bufnr })
   end
@@ -223,7 +251,7 @@ end
 ---@private
 ---use <C-N> to create new chat
 function Chat:_register_new_chat_keymap()
-  local bufnrs = { self.win.floats.input.bufnr, self.win.floats.response.bufnr }
+  local bufnrs = { self.win.wins.input.bufnr, self.win.wins.response.bufnr }
   for _, bufnr in ipairs(bufnrs) do
     vim.keymap.set({ "n", "i" }, "<C-N>", function()
       -- force creation of new chat
@@ -238,15 +266,15 @@ function Chat:_register_submit_keymap()
     self:_remove_submit_keymap()
     self:_input_enter_handler()
   end
-  vim.keymap.set("n", "<CR>", submit, { buffer = self.win.floats.input.bufnr, noremap = true, silent = true })
+  vim.keymap.set("n", "<CR>", submit, { buffer = self.win.wins.input.bufnr, noremap = true, silent = true })
   -- <C-CR>
-  vim.keymap.set("i", "<NL>", submit, { buffer = self.win.floats.input.bufnr, noremap = true, silent = true })
+  vim.keymap.set("i", "<NL>", submit, { buffer = self.win.wins.input.bufnr, noremap = true, silent = true })
 end
 
 ---@private
 function Chat:_remove_submit_keymap()
-  pcall(vim.keymap.del, "n", "<CR>", { buffer = self.win.floats.input.bufnr, noremap = true, silent = true })
-  pcall(vim.keymap.del, "i", "<NL>", { buffer = self.win.floats.input.bufnr, noremap = true, silent = true })
+  pcall(vim.keymap.del, "n", "<CR>", { buffer = self.win.wins.input.bufnr, noremap = true, silent = true })
+  pcall(vim.keymap.del, "i", "<NL>", { buffer = self.win.wins.input.bufnr, noremap = true, silent = true })
 end
 
 ---@private
@@ -261,9 +289,9 @@ end
 
 ---@private
 function Chat:_refresh_response_cursor()
-  if vim.api.nvim_win_is_valid(self.win.floats.response.winid) then
-    local new_row, new_col = util.get_last_char_position(self.win.floats.response.bufnr)
-    vim.api.nvim_win_set_cursor(self.win.floats.response.winid, { new_row, new_col })
+  if vim.api.nvim_win_is_valid(self.win.wins.response.winid) then
+    local new_row, new_col = util.get_last_char_position(self.win.wins.response.bufnr)
+    vim.api.nvim_win_set_cursor(self.win.wins.response.winid, { new_row, new_col })
   end
 end
 
@@ -281,7 +309,7 @@ function Chat:_update_thinking_head()
   local head_line = tonumber(self.start_think.payload)
   assert(head_line, "start_think.payload is nil or not a number")
   vim.api.nvim_buf_set_lines(
-    self.win.floats.response.bufnr,
+    self.win.wins.response.bufnr,
     head_line,
     head_line + 1,
     false,
@@ -294,25 +322,25 @@ end
 ---@param add_margin_bottom? boolean default true
 function Chat:_write_lines_to_response(lines, add_margin_bottom)
   if
-    vim.api.nvim_buf_line_count(self.win.floats.response.bufnr) == 1
-    and vim.api.nvim_buf_get_lines(self.win.floats.response.bufnr, 0, 1, false)[1] == ""
+    vim.api.nvim_buf_line_count(self.win.wins.response.bufnr) == 1
+    and vim.api.nvim_buf_get_lines(self.win.wins.response.bufnr, 0, 1, false)[1] == ""
   then
-    vim.api.nvim_buf_set_lines(self.win.floats.response.bufnr, 0, -1, false, lines)
+    vim.api.nvim_buf_set_lines(self.win.wins.response.bufnr, 0, -1, false, lines)
   else
-    vim.api.nvim_buf_set_lines(self.win.floats.response.bufnr, -1, -1, false, lines)
+    vim.api.nvim_buf_set_lines(self.win.wins.response.bufnr, -1, -1, false, lines)
   end
   if add_margin_bottom == nil or add_margin_bottom then
     -- add empty line
-    vim.api.nvim_buf_set_lines(self.win.floats.response.bufnr, -1, -1, false, { "" })
+    vim.api.nvim_buf_set_lines(self.win.wins.response.bufnr, -1, -1, false, { "" })
   end
   self:_refresh_response_cursor()
-  hl.mark_sections(self.win.floats.response.bufnr)
+  hl.mark_sections(self.win.wins.response.bufnr)
 end
 
 ---@private
 ---@param content string
 function Chat:_write_reason_text_to_response(content)
-  local bufnr = self.win.floats.response.bufnr
+  local bufnr = self.win.wins.response.bufnr
   local row, col = util.get_last_char_position(bufnr)
   -- thinking content style
   content = content:gsub("\n", "\n> ")
@@ -336,7 +364,7 @@ function Chat:_write_answer_text_to_response(content)
     content = (self.start_think.value and "\n" or "\n\n") .. content
     self.start_answer = false
   end
-  local bufnr = self.win.floats.response.bufnr
+  local bufnr = self.win.wins.response.bufnr
   local row, col = util.get_last_char_position(bufnr)
   local lines = vim.split(content, "\n")
   vim.api.nvim_buf_set_text(bufnr, row - 1, col, row - 1, col, lines)
@@ -415,8 +443,8 @@ function Chat:_after_begin()
   self.spinner:start()
   -- self:_add_request_separator()
   self:_register_stop_and_save_keymap()
-  if vim.api.nvim_win_is_valid(self.win.floats.response.winid) then
-    vim.api.nvim_set_current_win(self.win.floats.response.winid)
+  if vim.api.nvim_win_is_valid(self.win.wins.response.winid) then
+    vim.api.nvim_set_current_win(self.win.wins.response.winid)
   end
   if (os.difftime(os.time(), self.session.update_time)) > 60 * 60 then
     self:_add_long_time_separator()
@@ -505,7 +533,7 @@ end
 
 ---@private
 function Chat:_input_enter_handler()
-  local input_lines = vim.api.nvim_buf_get_lines(self.win.floats.input.bufnr, 0, -1, false)
+  local input_lines = vim.api.nvim_buf_get_lines(self.win.wins.input.bufnr, 0, -1, false)
   if input_lines[1] == "" then
     return
   end
@@ -563,7 +591,7 @@ function Chat:_input_enter_handler()
   -- add response message to session
   self.session:add_message(self.current_response)
   -- clear input
-  vim.api.nvim_buf_set_lines(self.win.floats.input.bufnr, 0, -1, false, {})
+  vim.api.nvim_buf_set_lines(self.win.wins.input.bufnr, 0, -1, false, {})
   -- write input to response buf
   self:_write_lines_to_response(self:_build_input_render_style(input_lines))
 end
