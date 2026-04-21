@@ -61,28 +61,19 @@ local Path = require "plenary.path"
 local function default_servers()
   return {
     {
-      server = "DeepSeek",
+      server = "OpenRouter",
       server_type = "chat",
-      base_url = "https://api.deepseek.com/v1/chat/completions",
-      api_key_name = "DEEPSEEK_API_KEY",
+      base_url = "https://openrouter.ai/api/v1/chat/completions",
+      api_key_name = "OPENROUTER_API_KEY",
       stream = true,
       multi_round = true,
-      temperature = 0.6,
       max_tokens = 4096,
       user_role = "user",
-      models = { "deepseek-chat", "deepseek-reasoner" },
-    },
-    {
-      server = "SiliconFlow",
-      server_type = "chat",
-      base_url = "https://api.siliconflow.cn/v1/chat/completions",
-      api_key_name = "SILICONFLOW_API_KEY",
-      stream = true,
-      multi_round = true,
-      temperature = 0.6,
-      max_tokens = 4096,
-      user_role = "user",
-      models = { "deepseek-ai/DeepSeek-V3", "deepseek-ai/DeepSeek-R1" },
+      models = {
+        { model = "anthropic/claude-opus-4", temperature = 0.4 },
+        { model = "openai/gpt-4.5", temperature = 0.4 },
+        { model = "google/gemini-3-pro", max_tokens = 8192, temperature = 0.4 },
+      },
     },
   }
 end
@@ -90,7 +81,7 @@ end
 function M.defaults()
   return {
     -- server@model
-    default_server = "SiliconFlow@deepseek-ai/DeepSeek-V3",
+    default_server = "OpenRouter@openai/gpt-4.5",
     loading_mark = "**Generating response ...**",
     user_prompt = "❯",
     question_hi = { fg = "#1abc9c" },
