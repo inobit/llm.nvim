@@ -262,7 +262,7 @@ function SessionManager:open_selector(select_callback, delete_callback)
       end
     end,
   }
-  self:_register_operator_keymap(picker.floats.input, picker.floats.content, picker.refresh_data, delete_callback)
+  self:_register_operator_keymap(picker.wins.input, picker.wins.content, picker.refresh_data, delete_callback)
 end
 
 -- <d> delete
