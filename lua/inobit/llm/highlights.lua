@@ -2,15 +2,28 @@ local M = {}
 
 local config = require "inobit.llm.config"
 
-if type(config.options.question_hi) == "string" then
-  vim.cmd("highlight! link InobitQuestion " .. config.options.question_hi)
-else
-  vim.api.nvim_set_hl(0, "InobitQuestion", config.options.question_hi --[[@as vim.api.keyset.highlight]])
-end
-
 local NAMESPACE = vim.api.nvim_create_namespace "inobit_llm_session"
 
 M.NAMESPACE = NAMESPACE
+
+---Setup highlight group based on configuration
+---Supports:
+--- - "GroupName" - link to another highlight group (e.g., "MoreMsg", "Question")
+--- - { fg = ..., bg = ..., ... } - custom color table
+function M.setup_highlight()
+  local question_hi = config.options.question_hi
+
+  if type(question_hi) == "string" then
+    -- link to existing highlight group
+    vim.cmd("highlight! link InobitQuestion " .. question_hi)
+  else
+    -- custom color table
+    vim.api.nvim_set_hl(0, "InobitQuestion", question_hi --[[@as vim.api.keyset.highlight]])
+  end
+end
+
+-- Initialize highlight on module load
+M.setup_highlight()
 
 ---@param buf integer
 ---@param start_row integer 0-indexed

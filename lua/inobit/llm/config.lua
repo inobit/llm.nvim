@@ -57,7 +57,7 @@ local Path = require "plenary.path"
 ---@field chat_layout "float" | "vsplit"
 ---@field loading_mark string
 ---@field user_prompt string
----@field question_hi string | vim.api.keyset.highlight
+---@field question_hi string | vim.api.keyset.highlight user question highlight, can be highlight group name or color table
 ---@field data_dir string
 ---@field session_dir string
 ---@field config_filename string
@@ -186,7 +186,7 @@ end
 ---@field chat_layout? "float" | "vsplit"
 ---@field loading_mark? string
 ---@field user_prompt? string
----@field question_hi? string | vim.api.keyset.highlight group name or options
+---@field question_hi? string | vim.api.keyset.highlight highlight group name, "link:GroupName", or color table
 ---@field thinking_hi? string | vim.api.keyset.highlight group name or options
 ---@field data_dir? string
 ---@field session_dir? string
