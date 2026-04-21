@@ -8,6 +8,7 @@ AI chat plugin for Neovim, supporting OpenRouter and any OpenAI-compatible API.
 - Session management (save, load, rename, delete)
 - Real-time streaming responses
 - Multi-round conversation support
+- **Retry functionality**: Press `r` on any user message to retry the question
 - Multiple AI providers support (OpenRouter, OpenAI, Gemini, Claude, etc.)
 - In-buffer translation with auto language detection (Chinese/English)
   - Directly translate and replace in buffer
@@ -166,6 +167,8 @@ function M.defaults()
     loading_mark = "**Generating response ...**",
     user_prompt = "❯",
     question_hi = { fg = "#1abc9c" },
+    retry_key = "r",                      -- Key to retry a question
+    retry_hint_text = " press 'r' to retry", -- Virtual text hint shown on user messages
     data_dir = vim.fn.stdpath "cache" .. "/inobit/llm",
     session_dir = "session",
     chat_win = {
@@ -206,13 +209,14 @@ end
 
 ### Chat Window Keymaps
 
-| Key       | Action                           |
-| --------- | -------------------------------- |
-| `<C-C>`   | End current session              |
-| `<C-S>`   | Save current session             |
-| `<C-N>`   | Create new session               |
-| `[q`      | Go to previous question (wrap)   |
-| `]q`      | Go to next question (wrap)       |
+| Key       | Action                                                          |
+| --------- | --------------------------------------------------------------- |
+| `<C-C>`   | End current session                                             |
+| `<C-S>`   | Save current session                                            |
+| `<C-N>`   | Create new session                                              |
+| `[q`      | Go to previous question (wrap)                                  |
+| `]q`      | Go to next question (wrap)                                      |
+| `r`       | Retry the question under cursor (when virtual text hint shows)  |
 
 ### Session Picker Keymaps
 
