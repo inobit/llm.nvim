@@ -45,6 +45,10 @@ local Path = require "plenary.path"
 ---@class llm.VSplitWinOptions
 ---@field width_percentage number
 
+---@class llm.NavOptions
+---@field next_question string
+---@field prev_question string
+
 ---@class llm.Config
 ---@field servers table<string, llm.server.ServerOptions>
 ---@field default_server string
@@ -61,6 +65,7 @@ local Path = require "plenary.path"
 ---@field session_picker_win llm.WinOptions
 ---@field server_picker_win llm.WinOptions
 ---@field vsplit_win llm.VSplitWinOptions
+---@field nav llm.NavOptions
 
 ---@return llm.config.ServerOptions[]
 local function default_servers()
@@ -113,6 +118,10 @@ function M.defaults()
     },
     vsplit_win = {
       width_percentage = 0.45,
+    },
+    nav = {
+      next_question = "]q",
+      prev_question = "[q",
     },
   }
 end
@@ -182,6 +191,7 @@ end
 ---@field session_picker_win? llm.WinOptions
 ---@field server_picker_win? llm.WinOptions
 ---@field vsplit_win? llm.VSplitWinOptions
+---@field nav? llm.NavOptions
 
 ---@param options? llm.SetupOptions
 function M.setup(options)

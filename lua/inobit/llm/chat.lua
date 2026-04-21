@@ -148,6 +148,7 @@ function Chat:new(exists_chat, exists_session)
 
   this:_resume_session()
   this:_register_new_chat_keymap()
+  this:_register_nav_keymaps()
   return this
 end
 
@@ -258,6 +259,59 @@ function Chat:_register_new_chat_keymap()
       ChatManager:new(SessionManager:new_session(ServerManager.chat_server.server, ServerManager.chat_server.model))
     end, { buffer = bufnr, noremap = true, silent = true })
   end
+end
+
+---@private
+---@param direction "next" | "prev"
+function Chat:_navigate_to_question(direction)
+  local bufnr = self.win.wins.response.bufnr
+  local prompt = config.options.user_prompt
+  local line_count = vim.api.nvim_buf_line_count(bufnr)
+  local cur_pos = vim.api.nvim_win_get_cursor(self.win.wins.response.winid)
+  local cur_line = cur_pos[1]
+
+  local function find_next_question_line(start_line, step)
+    local line = start_line + step
+    while line >= 1 and line <= line_count do
+      local line_text = vim.api.nvim_buf_get_lines(bufnr, line - 1, line, false)[1]
+      if line_text and vim.startswith(line_text, prompt) then
+        return line
+      end
+      line = line + step
+    end
+    return nil
+  end
+
+  local target_line
+  if direction == "next" then
+    target_line = find_next_question_line(cur_line, 1)
+    if not target_line then
+      target_line = find_next_question_line(0, 1)
+    end
+  else
+    target_line = find_next_question_line(cur_line, -1)
+    if not target_line then
+      target_line = find_next_question_line(line_count + 1, -1)
+    end
+  end
+
+  if target_line then
+    vim.api.nvim_win_set_cursor(self.win.wins.response.winid, { target_line, 0 })
+  end
+end
+
+---@private
+function Chat:_register_nav_keymaps()
+  local bufnr = self.win.wins.response.bufnr
+  local nav = config.options.nav
+
+  vim.keymap.set("n", nav.next_question, function()
+    self:_navigate_to_question("next")
+  end, { buffer = bufnr, noremap = true, silent = true, desc = "LLM: go to next question" })
+
+  vim.keymap.set("n", nav.prev_question, function()
+    self:_navigate_to_question("prev")
+  end, { buffer = bufnr, noremap = true, silent = true, desc = "LLM: go to previous question" })
 end
 
 ---@private
