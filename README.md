@@ -4,7 +4,7 @@ AI chat plugin for Neovim, supporting OpenRouter and any OpenAI-compatible API.
 
 ## Features
 
-- Floating chat window with markdown rendering support
+- Floating or vsplit chat window with markdown rendering support
 - Session management (save, load, rename, delete)
 - Real-time streaming responses
 - Multi-round conversation support
@@ -83,7 +83,13 @@ The plugin works out of the box with sensible defaults. To customize, pass optio
     -- Default server for translation tasks
     -- default_translate_server = "OpenRouter@google/gemini-2.5-flash",
 
-    -- Custom servers (optional - only add if you need additional providers)
+    -- Chat window layout: "float" (default) or "vsplit"
+    chat_layout = "float",
+
+    -- Vsplit window configuration (when chat_layout = "vsplit")
+    vsplit_win = {
+      width_percentage = 0.45,  -- Width of the chat panel (0.2 - 0.7)
+    },
     servers = {
       -- Example: Add more OpenRouter models
       {
@@ -150,6 +156,7 @@ end
 function M.defaults()
   return {
     default_server = "OpenRouter@openai/gpt-4.5",
+    chat_layout = "float",
     loading_mark = "**Generating response ...**",
     user_prompt = "❯",
     question_hi = { fg = "#1abc9c" },
@@ -172,6 +179,9 @@ function M.defaults()
       input_height = 1,
       content_height_percentage = 0.2,
       winblend = 5,
+    },
+    vsplit_win = {
+      width_percentage = 0.45,
     },
   }
 end
