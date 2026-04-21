@@ -135,10 +135,9 @@ local random = math.random
 ---uuid
 ---@return string
 function M.uuid()
-  local template = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx"
-  local ans = string.gsub(template, "[xy]", function(c)
-    local v = (c == "x") and random(0, 0xf) or random(8, 0xb)
-    return string.format("%x", v)
+  local template = "xxxxxxxxxxxxxxxx"
+  local ans = string.gsub(template, "x", function()
+    return string.format("%x", random(0, 0xf))
   end)
   return ans
 end
