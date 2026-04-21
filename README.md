@@ -166,7 +166,10 @@ function M.defaults()
     chat_layout = "float",
     loading_mark = "**Generating response ...**",
     user_prompt = "❯",
-    question_hi = { fg = "#1abc9c" },
+    -- question_hi supports:
+    -- - "GroupName" : link to a highlight group (e.g., "MoreMsg", "Question")
+    -- - { fg=..., bg=... }: custom color table
+    question_hi = "Question",
     retry_key = "r",                      -- Key to retry a question
     retry_hint_text = " press 'r' to retry", -- Virtual text hint shown on user messages
     data_dir = vim.fn.stdpath "cache" .. "/inobit/llm",
