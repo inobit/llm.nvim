@@ -66,6 +66,8 @@ local Path = require "plenary.path"
 ---@field server_picker_win llm.WinOptions
 ---@field vsplit_win llm.VSplitWinOptions
 ---@field nav llm.NavOptions
+---@field retry_key string
+---@field retry_hint_text string
 
 ---@return llm.config.ServerOptions[]
 local function default_servers()
@@ -95,7 +97,9 @@ function M.defaults()
     chat_layout = "float",
     loading_mark = "**Generating response ...**",
     user_prompt = "❯",
-    question_hi = { fg = "#1abc9c" },
+    question_hi = "Question",
+    retry_key = "r",
+    retry_hint_text = " press 'r' to retry",
     data_dir = vim.fn.stdpath "cache" .. "/inobit/llm",
     session_dir = "session",
     chat_win = {
@@ -192,6 +196,8 @@ end
 ---@field server_picker_win? llm.WinOptions
 ---@field vsplit_win? llm.VSplitWinOptions
 ---@field nav? llm.NavOptions
+---@field retry_key? string
+---@field retry_hint_text? string
 
 ---@param options? llm.SetupOptions
 function M.setup(options)
