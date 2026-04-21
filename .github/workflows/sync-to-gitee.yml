@@ -17,5 +17,5 @@ jobs:
 
       - name: Push to Gitee
         run: |
-          git remote add gitee https://${{ secrets.GITEE_TOKEN }}@gitee.com/inobit/llm.nvim.git
+          git remote add gitee https://inobit:${{ secrets.GITEE_TOKEN }}@gitee.com/inobit/llm.nvim.git
           git push gitee main:main || git push gitee main:main --force
