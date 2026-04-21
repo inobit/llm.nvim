@@ -1,76 +1,119 @@
 # llm.nvim
 
-AI chat, currently supports OpenAI API
+AI chat plugin for Neovim, supporting OpenRouter and any OpenAI-compatible API.
 
-# Features
+## Features
 
-- floating chat window
-- session manage
-- translate
-  one can directly translate and replace in the buffer, or use the TS command to translate the specified content(the result will be displayed in a floating window).
-  can automatically detect language(chinese or english)
+- Floating chat window with markdown rendering support
+- Session management (save, load, rename, delete)
+- Real-time streaming responses
+- Multi-round conversation support
+- Multiple AI providers support (OpenRouter, OpenAI, Gemini, Claude, etc.)
+- In-buffer translation with auto language detection (Chinese/English)
+  - Directly translate and replace in buffer
+  - Use `:TS` command to translate and display in floating window
+  - Support multiple translation styles:
+    - `E2Z`: English to Chinese
+    - `Z2E`: Chinese to English
+    - `Z2E_CAMEL`: Chinese to English camelCase variable
+    - `Z2E_UNDERLINE`: Chinese to English snake_case variable
   ```shell
-  :TS [ E2Z | Z2E | Z2E_CAMEL | Z2E_UNDERLINE ] <text>
-  ```
-- the server API key is set through environment variables
-  ```shell
-  export <your api key name> <key>
-  ```
-  or
-  ```lua
-  vim.fn.setenv("<your api key name>", "<key>")
+  :TS [E2Z | Z2E | Z2E_CAMEL | Z2E_UNDERLINE] <text>
   ```
 
-# Installation
+## Requirements
 
-use lazy.nvim
+- Neovim >= 0.10.0
+- [plenary.nvim](https://github.com/nvim-lua/plenary.nvim) (required)
+- API key for your chosen provider (see below)
+
+## Installation
+
+Using [lazy.nvim](https://github.com/folke/lazy.nvim):
 
 ```lua
 return {
-  {
-    url = "https://gitee.com/inobit/llm.nvim.git",
-    dependencies = {
-      "nvim-lua/plenary.nvim",
-    },
-    keys = {
-      -- stylua: ignore start
-      { "<leader>mc", "<Cmd>LLM Chat<CR>", desc = "LLM: chat start" },
-      { "<leader>ms", "<Cmd>LLM Sessions<CR>", desc = "LLM: select session" },
-      { "<leader>mv", "<Cmd>LLM ChatServers<CR>", desc = "LLM: select chat server" },
-      { "<leader>mt", "<Cmd>LLM TSServers<CR>", desc = "LLM: select translate server" },
+  "inobit/llm.nvim",
+  dependencies = { "nvim-lua/plenary.nvim" },
+  main = "inobit/llm",
+  opts = {}
+}
+```
+
+## Setup
+
+### 1. Set API Key
+
+The plugin uses the default OpenRouter configuration. Set your API key:
+
+```shell
+export OPENROUTER_API_KEY="your-api-key"
+```
+
+Or in your Neovim config:
+
+```lua
+vim.fn.setenv("OPENROUTER_API_KEY", "your-api-key")
+```
+
+## Configuration
+
+The plugin works out of the box with sensible defaults. To customize, pass options to the setup function:
+
+```lua
+{
+  "inobit/llm.nvim",
+  dependencies = { "nvim-lua/plenary.nvim" },
+  main = "inobit/llm",
+  -- Optional: custom keymaps
+  keys = {
+    { "<leader>mc", "<Cmd>LLM Chat<CR>", desc = "LLM: chat start" },
+    { "<leader>ms", "<Cmd>LLM Sessions<CR>", desc = "LLM: select session" },
+    { "<leader>mv", "<Cmd>LLM ChatServers<CR>", desc = "LLM: select chat server" },
+    { "<leader>mt", "<Cmd>LLM TSServers<CR>", desc = "LLM: select translate server" },
+    { "<leader>ts", function() require("inobit.llm.api").translate_in_buffer(true) end, mode = { "n", "v" }, desc = "LLM: translate and replace" },
+    { "<leader>tc", function() require("inobit.llm.api").translate_in_buffer(true, "Z2E_CAMEL") end, mode = { "n", "v" }, desc = "LLM: translate to VAR_CAMEL" },
+    { "<leader>tu", function() require("inobit.llm.api").translate_in_buffer(true, "Z2E_UNDERLINE") end, mode = { "n", "v" }, desc = "LLM: translate to VAR_UNDERLINE" },
+    { "<leader>tp", function() require("inobit.llm.api").translate_in_buffer(false) end, mode = { "n", "v" }, desc = "LLM: translate and print" },
+  },
+  opts = {
+    -- Default server@model to use (format: "ServerName@model-name")
+    default_server = "OpenRouter@openai/gpt-4.5",
+
+    -- Default server for translation tasks
+    -- default_translate_server = "OpenRouter@google/gemini-2.5-flash",
+
+    -- Custom servers (optional - only add if you need additional providers)
+    servers = {
+      -- Example: Add more OpenRouter models
       {
-        "<leader>ts", function() require("inobit.llm.api").translate_in_buffer(true)  end, mode = { "n", "v" }, desc = "LLM: translate and replace",
+        server = "OpenRouter",
+        server_type = "chat",
+        base_url = "https://openrouter.ai/api/v1/chat/completions",
+        api_key_name = "OPENROUTER_API_KEY",
+        stream = true,
+        multi_round = true,
+        max_tokens = 4096,
+        user_role = "user",
+        models = {
+          { model = "anthropic/claude-opus-4", temperature = 0.4 },
+          { model = "anthropic/claude-sonnet-4", temperature = 0.4 },
+          { model = "openai/gpt-4.5", temperature = 0.4 },
+          { model = "openai/gpt-4o", temperature = 0.4 },
+          { model = "google/gemini-2.5-flash", max_tokens = 8192, temperature = 0.6 },
+          { model = "google/gemini-3-pro", max_tokens = 8192, temperature = 0.4 },
+        },
       },
+
+      -- Example: Add translation server (DeepL/DeepLX)
       {
-        "<leader>tc", function() require("inobit.llm.api").translate_in_buffer(true, "Z2E_CAMEL") end, mode = { "n", "v" }, desc = "LLM: translate to VAR_CAMEL",
-      },
-      {
-        "<leader>tu", function() require("inobit.llm.api").translate_in_buffer(true, "Z2E_UNDERLINE") end, mode = { "n", "v" }, desc = "LLM: translate to VAR_UNDERLINE",
-      },
-      {
-        "<leader>tp", function() require("inobit.llm.api").translate_in_buffer(false)  end, mode = { "n", "v" }, desc = "LLM: translate and print",
-      },
-      -- stylua: ignore end
-    },
-    cmd = { "LLM", "TS" },
-    main = "inobit/llm",
-    -- your config
-    opts = {
-      servers = {
-        {
-          server = "DeepL",
-          server_type = "translate",
-          models = {
-            {
-              model = "DeepLX",
-              base_url = "http://localhost:1188/translate", -- self-build DeepLX(OwO-Network/DeepLX)
-              api_key_name = "DEEPLX_API_KEY",
-            },
-            {
-              model = "DeepL",
-              base_url = "https://api.deepl.com/translate", -- Authorization: DeepL-Auth-Key [yourAuthKey]
-              api_key_name = "DEEPL_API_KEY",
-            }
+        server = "DeepL",
+        server_type = "translate",
+        models = {
+          {
+            model = "DeepLX",
+            base_url = "http://localhost:1188/translate", -- Self-hosted DeepLX
+            api_key_name = "DEEPLX_API_KEY",
           },
         },
       },
@@ -79,7 +122,7 @@ return {
 }
 ```
 
-# Default Config
+## Default Configuration
 
 ```lua
 -- lua/inobit/llm/config.lua
@@ -87,32 +130,26 @@ return {
 local function default_servers()
   return {
     {
-      server = "DeepSeek",
-      server_type = "chat"
-      base_url = "https://api.deepseek.com/v1/chat/completions",
-      api_key_name = "DEEPSEEK_API_KEY",
+      server = "OpenRouter",
+      server_type = "chat",
+      base_url = "https://openrouter.ai/api/v1/chat/completions",
+      api_key_name = "OPENROUTER_API_KEY",
       stream = true,
       multi_round = true,
+      max_tokens = 4096,
       user_role = "user",
-      models = { "deepseek-chat", "deepseek-reasoner" },
-    },
-    {
-      server = "SiliconFlow",
-      server_type = "chat"
-      base_url = "https://api.siliconflow.cn/v1/chat/completions",
-      api_key_name = "SILICONFLOW_API_KEY",
-      stream = true,
-      multi_round = true,
-      user_role = "user",
-      models = { "deepseek-ai/DeepSeek-V3", "deepseek-ai/DeepSeek-R1" },
+      models = {
+        { model = "anthropic/claude-opus-4", temperature = 0.4 },
+        { model = "openai/gpt-4.5", temperature = 0.4 },
+        { model = "google/gemini-3-pro", max_tokens = 8192, temperature = 0.4 },
+      },
     },
   }
 end
 
 function M.defaults()
   return {
-    -- server@model
-    default_server = "SiliconFlow@deepseek-ai/DeepSeek-V3",
+    default_server = "OpenRouter@openai/gpt-4.5",
     loading_mark = "**Generating response ...**",
     user_prompt = "❯",
     question_hi = { fg = "#1abc9c" },
@@ -140,24 +177,35 @@ function M.defaults()
 end
 ```
 
-# Usage
+## Usage
 
-```shell
-:LLM Start # start chat
-:LLM Sessions # select session
-:LLM ChatServers # select chat server
-:LLM TSServers # selcect translate server
-```
+### Commands
 
-- `<C-C>` end session in chat window
-- `<C-S>` save session in chat window
-- `<C-N>` create new session in chat window
-- `r` rename session in session picker window
-- `d` delete session in session picker window
+| Command            | Description                         |
+| ------------------ | ----------------------------------- |
+| `:LLM Chat`        | Start a new chat session            |
+| `:LLM Sessions`    | Select and manage existing sessions |
+| `:LLM ChatServers` | Select chat server (model)          |
+| `:LLM TSServers`   | Select translation server           |
 
-# Integration
+### Chat Window Keymaps
 
-## render-markdown
+| Key     | Action               |
+| ------- | -------------------- |
+| `<C-C>` | End current session  |
+| `<C-S>` | Save current session |
+| `<C-N>` | Create new session   |
+
+### Session Picker Keymaps
+
+| Key | Action         |
+| --- | -------------- |
+| `r` | Rename session |
+| `d` | Delete session |
+
+## Integration
+
+### render-markdown
 
 You can use the [render-markdown.nvim](https://github.com/MeanderingProgrammer/render-markdown.nvim) plugin to render the AI's response.
 
@@ -178,7 +226,6 @@ Configure `render-markdown`:
 > [!Note] Alone or as a dependency.
 
 ```lua
-
 return {
   "MeanderingProgrammer/render-markdown.nvim",
   dependencies = {
@@ -186,14 +233,10 @@ return {
     "nvim-tree/nvim-web-devicons",
   }, -- if you prefer nvim-web-devicons
   opts = {
-    -- Vim modes that will show a rendered view of the markdown file
-    -- All other modes will be unaffected by this plugin
-    -- render_modes = { "n", "c" },
     render_modes = true,
     code = {
       sign = false,
       width = "full",
-      -- right_pad = 1,
     },
     heading = {
       sign = false,
@@ -208,7 +251,7 @@ return {
 }
 ```
 
-## lualine
+### lualine
 
 ```lua
 lualine_x = {
@@ -223,7 +266,10 @@ lualine_x = {
     cond = function() return package.loaded["inobit.llm"] and require("inobit.llm.api"):has_chats() > 0 end,
     color = function() return { fg = string.format("#%06x", vim.api.nvim_get_hl(0, { name = "DiagnosticHint", link = false }).fg) } end,
   },
-  -- your other status
   -- stylua: ignore end
 }
 ```
+
+## License
+
+MIT
