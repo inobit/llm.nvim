@@ -19,3 +19,4 @@ jobs:
         run: |
           git remote add gitee https://inobit:${{ secrets.GITEE_TOKEN }}@gitee.com/inobit/llm.nvim.git
           git push gitee main:main || git push gitee main:main --force
+          git push gitee --tags || git push gitee --tags --force
