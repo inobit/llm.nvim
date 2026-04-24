@@ -30,7 +30,7 @@ describe("Server Manager", function()
     local server = ServerManager.default_server --[[@as llm.OpenAIServer]]
     local args = server:build_request_opts({
       { role = "user", content = "test" },
-    }, nil, { method = "POST" })
+    }, nil)
     assert.equals(
       vim.fn.json_encode {
         model = "test-model",
