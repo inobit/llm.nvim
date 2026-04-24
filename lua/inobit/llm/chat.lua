@@ -1,7 +1,7 @@
 local util = require "inobit.llm.util"
 local config = require "inobit.llm.config"
 local SessionManager = require "inobit.llm.session"
-local ServerManager = require "inobit.llm.server"
+local ProviderManager = require "inobit.llm.provider"
 local win = require "inobit.llm.win"
 local hl = require "inobit.llm.highlights"
 local notify = require "inobit.llm.notify"
@@ -21,7 +21,7 @@ local RETRY_HINT_EXTMARK_ID = 999999999 -- special id for retry hint virtual tex
 ---@class llm.Chat
 ---@field win llm.win.BaseChatWin
 ---@field session llm.Session
----@field server llm.Server
+---@field provider llm.Provider
 ---@field requesting? llm.RequestJob
 ---@field spinner llm.Spinner
 ---@field start_think llm.Chat.BoolPayload
@@ -145,13 +145,13 @@ function Chat:new(exists_chat, exists_session)
     local chat_layout = config.options.chat_layout
     if chat_layout == "vsplit" then
       this.win = win.SplitChatWin:new {
-        title = this.session.server .. "@" .. this.session.model,
+        title = this.session.provider .. "@" .. this.session.model,
         input_bufnr = this.win.wins.input.bufnr,
         response_bufnr = this.win.wins.response.bufnr,
       }
     else
       this.win = win.ChatWin:new {
-        title = this.session.server .. "@" .. this.session.model,
+        title = this.session.provider .. "@" .. this.session.model,
         input_bufnr = this.win.wins.input.bufnr,
         response_bufnr = this.win.wins.response.bufnr,
       }
@@ -159,18 +159,18 @@ function Chat:new(exists_chat, exists_session)
   else
     this = setmetatable({}, Chat)
     this.session = exists_session
-      or SessionManager:new_session(ServerManager.chat_server.server, ServerManager.chat_server.model)
-    this.server = ServerManager.servers[this.session.server .. "@" .. this.session.model]
+      or SessionManager:new_session(ProviderManager.chat_provider.provider, ProviderManager.chat_provider.model)
+    this.provider = ProviderManager.providers[this.session.provider .. "@" .. this.session.model]
 
     -- Choose window type based on config
     local chat_layout = config.options.chat_layout
     if chat_layout == "vsplit" then
       this.win = win.SplitChatWin:new {
-        title = this.session.server .. "@" .. this.session.model,
+        title = this.session.provider .. "@" .. this.session.model,
       }
     else
       this.win = win.ChatWin:new {
-        title = this.session.server .. "@" .. this.session.model,
+        title = this.session.provider .. "@" .. this.session.model,
       }
     end
   end
@@ -193,7 +193,7 @@ end
 ---@return integer
 function Chat:_set_header()
   local headers = {
-    string.format("- **server@model**: %s@%s", self.session.server, self.session.model),
+    string.format("- **provider@model**: %s@%s", self.session.provider, self.session.model),
     string.format("- **create time**: %s", os.date("%Y-%m-%d %H:%M:%S", self.session.create_time)),
     string.format("- **session title**: %s", self.session.title),
     string.format("- **session id**: %s", self.session.id),
@@ -218,7 +218,7 @@ function Chat:_resume_session()
   -- Re-render all messages from session
   if not vim.tbl_isempty(self.session.content) then
     for idx, message in ipairs(self.session.content) do
-      if message.role == (self.server.user_role or "user") then
+      if message.role == (self.provider.user_role or "user") then
         -- user message
         local start_line = vim.api.nvim_buf_line_count(self.win.wins.response.bufnr)
         self:_write_lines_to_response(self:_build_input_render_style(vim.split(message.content, "\n")))
@@ -302,7 +302,9 @@ function Chat:_register_new_chat_keymap()
         self:_prompt_fork_or_new()
       else
         -- Empty session, create new one directly
-        ChatManager:new(SessionManager:new_session(ServerManager.chat_server.server, ServerManager.chat_server.model))
+        ChatManager:new(
+          SessionManager:new_session(ProviderManager.chat_provider.provider, ProviderManager.chat_provider.model)
+        )
       end
     end, { buffer = bufnr, noremap = true, silent = true })
   end
@@ -329,7 +331,8 @@ function Chat:_prompt_fork_or_new()
     local total_rounds = math.floor(#self.session.content / 2)
     if choice:match "^n" then
       -- New session
-      new_session = SessionManager:new_session(ServerManager.chat_server.server, ServerManager.chat_server.model)
+      new_session =
+        SessionManager:new_session(ProviderManager.chat_provider.provider, ProviderManager.chat_provider.model)
     elseif choice:match "^5" then
       -- Fork last 5 rounds
       new_session =
@@ -546,14 +549,14 @@ function Chat:_handle_retry()
   local message_index = extmarks[1][1] -- extmark id is the message_index
   local message = self.session.content[message_index]
 
-  if not message or message.role ~= (self.server.user_role or "user") then
+  if not message or message.role ~= (self.provider.user_role or "user") then
     return
   end
 
   -- Get the last user message index in session
   local last_user_index = nil
   for i = #self.session.content, 1, -1 do
-    if self.session.content[i].role == (self.server.user_role or "user") then
+    if self.session.content[i].role == (self.provider.user_role or "user") then
       last_user_index = i
       break
     end
@@ -563,7 +566,7 @@ function Chat:_handle_retry()
   local is_last_unanswered = message_index == last_user_index
     and (
       message_index == #self.session.content
-      or self.session.content[message_index + 1].role == (self.server.user_role or "user")
+      or self.session.content[message_index + 1].role == (self.provider.user_role or "user")
     )
 
   if is_last_unanswered then
@@ -602,7 +605,7 @@ function Chat:_submit_message(message, is_new_message, input_lines)
   -- construct send content
   ---@type llm.session.Message[]
   local send_content = { message }
-  if self.server.multi_round then
+  if self.provider.multi_round then
     send_content = self.session:multi_round_filter()
     -- For new messages, message is already in session via multi_round_filter
     -- No need to insert again
@@ -618,9 +621,9 @@ function Chat:_submit_message(message, is_new_message, input_lines)
     end
   end
 
-  ---@type llm.server.RequestOpts
+  ---@type llm.provider.RequestOpts
   local opts = self
-    .server--[[@as llm.OpenAIServer]]
+    .provider--[[@as llm.OpenAIProvider]]
     :build_request_opts(send_content, { stream = true })
 
   -- stylua: ignore start
@@ -648,7 +651,7 @@ function Chat:_submit_message(message, is_new_message, input_lines)
   end
 
   -- send request (stream may start immediately)
-  local job = self.server:request(opts)
+  local job = self.provider:request(opts)
 
   if job and job:is_active() then
     self.requesting = job
@@ -773,7 +776,7 @@ function Chat:_response_handler(res)
     return
   end
 
-  local chunk = self.server:handle_stream_chunk(res, self)
+  local chunk = self.provider:handle_stream_chunk(res, self)
 
   -- not match normal response
   if chunk == nil then
@@ -851,10 +854,10 @@ function Chat:_maybe_generate_title()
   -- 3. Check message structure
   local first_msg = self.session.content[1]
   local second_msg = self.session.content[2]
-  if first_msg.role ~= (self.server.user_role or "user") then
+  if first_msg.role ~= (self.provider.user_role or "user") then
     return
   end
-  if second_msg.role == (self.server.user_role or "user") then
+  if second_msg.role == (self.provider.user_role or "user") then
     return
   end
 
@@ -902,16 +905,16 @@ function Chat:_generate_title_async(first_message)
     },
   }
 
-  -- Use specified light model or fallback to main server
-  local title_server
+  -- Use specified light model or fallback to main provider
+  local title_provider
   if naming_config.model then
-    local server_key = naming_config.model
-    title_server = ServerManager.servers[server_key]
+    local provider_key = naming_config.model
+    title_provider = ProviderManager.providers[provider_key]
   end
-  title_server = title_server or self.server --[[@as llm.OpenAIServer]]
+  title_provider = title_provider or self.provider --[[@as llm.OpenAIProvider]]
 
-  -- Build request using server:request for unified handling
-  local opts = title_server:build_request_opts(messages, { stream = false, temperature = 0.4, max_tokens = 100 })
+  -- Build request using provider:request for unified handling
+  local opts = title_provider:build_request_opts(messages, { stream = false, temperature = 0.4, max_tokens = 100 })
 
   opts.callback = function(data)
     self.session._title_generation_job = nil
@@ -919,7 +922,7 @@ function Chat:_generate_title_async(first_message)
       return
     end
 
-    local title = title_server:parse_direct_result(data)
+    local title = title_provider:parse_direct_result(data)
     if title then
       self.session.title = title
       self.session:save { silent = true }
@@ -927,7 +930,7 @@ function Chat:_generate_title_async(first_message)
   end
 
   -- Send request via unified request method
-  self.session._title_generation_job = title_server:request(opts)
+  self.session._title_generation_job = title_provider:request(opts)
 end
 
 ---@private
@@ -963,7 +966,7 @@ function Chat:_init_response_status()
   self.current_response_reasoning = { role = "assistant", reasoning_content = "" }
 end
 
----@param error llm.server.Error
+---@param error llm.provider.Error
 function Chat:on_error(error)
   local err = string.format("[!CAUTION] Error!\n%s", error.message)
   local err_lines = vim.split(err, "\n")
@@ -985,7 +988,7 @@ function Chat:parse_error(error)
     -- maybe keep alive message,just ignore
     return
   end
-  ---@type llm.server.Error
+  ---@type llm.provider.Error
   local err_obj = {
     message = error,
     stderr = "",
@@ -1027,7 +1030,7 @@ function Chat:_input_enter_handler()
 
   ---construct input message
   ---@type llm.session.Message
-  local input_message = { role = self.server.user_role or "user", content = table.concat(input_lines, "\n") }
+  local input_message = { role = self.provider.user_role or "user", content = table.concat(input_lines, "\n") }
 
   -- submit message
   self:_submit_message(input_message, true, input_lines)

@@ -18,7 +18,7 @@ local notify = require "inobit.llm.notify"
 ---@field inherited_count integer
 ---@field create_time integer
 ---@field update_time integer
----@field server string
+---@field provider string
 ---@field model string
 local SessionIndex = {}
 SessionIndex.__index = SessionIndex
@@ -85,17 +85,17 @@ function SessionIndex:delete(on_post_delete)
   end
 end
 
----@param server string
+---@param provider string
 ---@param model string
 ---@return llm.Session
-function Session:new(server, model)
+function Session:new(provider, model)
   local id = util.uuid()
   local this = {
     id = id,
     title = id,
     create_time = os.time(),
     update_time = os.time(),
-    server = server,
+    provider = provider,
     model = model,
     inherited_count = 0,
     content = {},
@@ -163,11 +163,11 @@ function SessionManager:_save()
   io.write_json(self.session_list_path, list)
 end
 
----@param server string
+---@param provider string
 ---@param model string
 ---@return llm.Session
-function SessionManager:new_session(server, model)
-  local session = Session:new(server, model)
+function SessionManager:new_session(provider, model)
+  local session = Session:new(provider, model)
   -- add to list
   self.session_list[session.id] = session
   return session
@@ -177,7 +177,7 @@ end
 ---@param carry_rounds integer|"all"|{start: integer, ["end"]: integer}
 ---@return llm.Session
 function SessionManager:fork_session(source_session, carry_rounds)
-  local new_session = Session:new(source_session.server, source_session.model)
+  local new_session = Session:new(source_session.provider, source_session.model)
 
   -- Calculate messages to copy
   local messages_to_copy = {}
@@ -310,7 +310,7 @@ function SessionManager:session_selector()
       return string.format(
         "%s[%s@%s] %s %s",
         prefix,
-        index.server,
+        index.provider,
         index.model,
         os.date("%Y-%m-%d %H:%M", index.update_time),
         title
@@ -322,14 +322,14 @@ end
 ---@param selected string
 ---@return llm.SessionIndex?
 function SessionManager:get_selected_session_index(selected)
-  -- 格式: "  [server@model] 2024-01-15 10:30 title" 或 "└[server@model] 2024-01-15 10:30 title"
-  local _, server_model, update_time, title =
+  -- 格式: "  [provider@model] 2024-01-15 10:30 title" 或 "└[provider@model] 2024-01-15 10:30 title"
+  local _, provider_model, update_time, title =
     selected:match "^([%s└]*)%[([^%]]+)%]%s+(%d%d%d%d%-%d%d%-%d%d %d%d:%d%d)%s+(.*)$"
-  if not server_model or not update_time then
+  if not provider_model or not update_time then
     return nil
   end
   local session_index = vim.iter(vim.tbl_values(self.session_list)):find(function(index)
-    return index.server .. "@" .. index.model == server_model
+    return index.provider .. "@" .. index.model == provider_model
       and os.date("%Y-%m-%d %H:%M", index.update_time) == update_time
       and index.title == title
   end)

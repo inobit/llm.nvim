@@ -1,7 +1,7 @@
 local M = {}
 local ChatManager = require "inobit.llm.chat"
 local SessionManager = require "inobit.llm.session"
-local ServerManager = require "inobit.llm.server"
+local ProviderManager = require "inobit.llm.provider"
 local translate = require "inobit.llm.translate"
 local notify = require "inobit.llm.notify"
 
@@ -68,12 +68,12 @@ M.open_session_selector = function()
   end)
 end
 
-M.open_chat_server_selector = function()
-  ServerManager:open_selector "chat"
+M.open_chat_provider_selector = function()
+  ProviderManager:open_provider_selector "chat"
 end
 
-M.open_translate_server_selector = function()
-  ServerManager:open_selector "translate"
+M.open_translate_provider_selector = function()
+  ProviderManager:open_provider_selector "translate"
 end
 
 ---@param text string

@@ -1,6 +1,6 @@
 local M = {}
 
-local ServerManager = require "inobit.llm.server"
+local ProviderManager = require "inobit.llm.provider"
 local util = require "inobit.llm.util"
 local notify = require "inobit.llm.notify"
 local win = require "inobit.llm.win"
@@ -47,7 +47,7 @@ local function build_translation_prompt(params)
 
   return {
     { role = "system", content = system_prompt },
-    { role = ServerManager.translate_server.user_role or "user", content = content },
+    { role = ProviderManager.translate_provider.user_role or "user", content = content },
   }
 end
 
@@ -207,7 +207,7 @@ end
 ---@param from text_from
 ---@param text string
 ---@param callback fun(content: string,from?: text_from)
----@param on_error? fun(err: llm.server.Error)
+---@param on_error? fun(err: llm.provider.Error)
 function M.translate(translate_type, specification, from, text, callback, on_error)
   -- check text
   if util.empty_str(text) then
@@ -220,11 +220,11 @@ function M.translate(translate_type, specification, from, text, callback, on_err
     return
   end
 
-  local server = ServerManager.translate_server --[[@as llm.OpenAIServer | llm.DeepLServer]]
+  local provider = ProviderManager.translate_provider --[[@as llm.OpenAIProvider | llm.DeepLProvider]]
   local messages = {}
   local opts = {}
 
-  if server:is_chat_server() then
+  if provider:is_chat_provider() then
     if translate_type == "E2Z" then
       messages = translate_en_to_zh(text, specification)
     elseif translate_type == "Z2E" then
@@ -234,23 +234,23 @@ function M.translate(translate_type, specification, from, text, callback, on_err
     elseif translate_type == "Z2E_UNDERLINE" then
       messages = translate_zh_to_en_var_underline(text)
     end
-    opts = server:build_request_opts(messages, { stream = false, temperature = 1.3 })
-  elseif server:is_translate_server() then
-    messages.text = server.clean_source_text and server:clean_source_text(text) or text
+    opts = provider:build_request_opts(messages, { stream = false, temperature = 1.3 })
+  elseif provider:is_translate_provider() then
+    messages.text = provider.clean_source_text and provider:clean_source_text(text) or text
     if vim.startswith(translate_type, "E2Z") then
       messages.target_lang = "ZH"
     elseif vim.startswith(translate_type, "Z2E") then
       messages.target_lang = "EN"
     end
-    opts = server--[[@as llm.DeepLServer]]:build_request_opts(messages)
+    opts = provider--[[@as llm.DeepLProvider]]:build_request_opts(messages)
   else
-    notify.error(string.format("Server %s not supported", server))
+    notify.error(string.format("Provider %s not supported", provider))
     return
   end
 
   local exit_callback = function(res)
     if res.status == 200 then
-      local result = server:parse_translation_result(res)
+      local result = provider:parse_translation_result(res)
       if result then
         if type(result) == "table" then
           if specification == "simple" or result.alternatives == nil or #result.alternatives == 0 then
@@ -278,7 +278,7 @@ function M.translate(translate_type, specification, from, text, callback, on_err
       on_error(err)
     end
   end
-  if ServerManager.translate_server:request(opts) ~= nil then
+  if ProviderManager.translate_provider:request(opts) ~= nil then
     spinner:start()
   end
 end

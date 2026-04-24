@@ -16,10 +16,10 @@ function M.setup(opts)
       api.toggle_chat()
     elseif command == "Sessions" then
       api.open_session_selector()
-    elseif command == "ChatServers" then
-      api.open_chat_server_selector()
-    elseif command == "TSServers" then
-      api.open_translate_server_selector()
+    elseif command == "ChatProviders" then
+      api.open_chat_provider_selector()
+    elseif command == "TSProviders" then
+      api.open_translate_provider_selector()
     else
       notify.warn "Invalid LLM command"
     end
