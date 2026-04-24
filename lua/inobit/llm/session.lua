@@ -25,7 +25,7 @@ SessionIndex.__index = SessionIndex
 
 ---@class llm.Session: llm.SessionIndex
 ---@field content llm.session.Message[]
----@field _title_generation_job? vim.SystemObj
+---@field _title_generation_job? llm.RequestJob
 local Session = {}
 Session.__index = Session
 -- extend SessionIndex
