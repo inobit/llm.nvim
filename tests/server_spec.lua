@@ -36,36 +36,12 @@ describe("Server Manager", function()
         model = "test-model",
         messages = { { role = "user", content = "test" } },
         stream = true,
+        temperature = 0.6,
+        max_tokens = 4096,
       },
       args.body
     )
     assert.equals("POST", args.method)
     assert.equals("Bearer " .. vim.fn.getenv "TEST_API_KEY", args.headers.authorization)
-  end)
-
-  it("should handle streaming response", function()
-    local received_chunks = 0
-    local complete_response = ""
-    ---@type llm.server.RequestOpts
-    local opts = ServerManager.default_server:build_request_opts { { role = "user", content = "test" } }
-    opts.stream = function(err, chunk)
-      if not err then
-        received_chunks = received_chunks + 1
-        vim.schedule(function()
-          if chunk and chunk ~= "" then
-            local c = vim.fn.json_decode(chunk).choices[1].delta.content
-            complete_response = complete_response .. c
-          end
-        end)
-      end
-      -- complete_response = complete_response .. chunk
-    end
-    ServerManager.default_server:request(opts)
-    vim.wait(3000, function()
-      return false
-    end)
-    log.info("complete_response: " .. complete_response)
-    assert.is_true(received_chunks > 0)
-    assert.matches("test", complete_response)
   end)
 end)

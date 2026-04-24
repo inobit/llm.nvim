@@ -63,7 +63,7 @@ describe("SessionManager", function()
   it("it should be able to rename session", function()
     local session = SessionManager:new_session("test_server", "test_model")
     session.content = { { "test content" } }
-    session:rename "new_name"
-    assert.equals("new_name", SessionManager.session_list[session.id].name)
+    session:rename "new_title"
+    assert.equals("new_title", SessionManager.session_list[session.id].title)
   end)
 end)

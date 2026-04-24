@@ -333,7 +333,7 @@ describe("Chat Layout", function()
         chat_layout = "vsplit",
         session_dir = "tests",
       }
-      ChatManager = require("inobit.llm.chat")
+      ChatManager = require "inobit.llm.chat"
       -- Initialize session manager
       local SessionManager = require "inobit.llm.session"
       SessionManager:init(true)
