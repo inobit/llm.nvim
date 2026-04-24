@@ -22,7 +22,7 @@ local RETRY_HINT_EXTMARK_ID = 999999999 -- special id for retry hint virtual tex
 ---@field win llm.win.BaseChatWin
 ---@field session llm.Session
 ---@field server llm.Server
----@field requesting? Job
+---@field requesting? llm.RequestJob
 ---@field spinner llm.Spinner
 ---@field start_think llm.Chat.BoolPayload
 ---@field start_answer llm.Chat.BoolRef
@@ -117,7 +117,7 @@ function ChatManager:delete_chat(session)
 
   -- 2. Cancel title generation job
   if chat.session and chat.session._title_generation_job then
-    pcall(chat.session._title_generation_job.kill, chat.session._title_generation_job, "sigterm")
+    chat.session._title_generation_job:kill()
     chat.session._title_generation_job = nil
   end
 
@@ -253,7 +253,7 @@ end
 function Chat:_close(signal)
   if self.requesting then
     if signal ~= 0 then
-      self.requesting:shutdown(signal)
+      self.requesting:kill(9)
     end
     self.requesting = nil
   end
@@ -649,8 +649,8 @@ function Chat:_submit_message(message, is_new_message, input_lines)
   -- send request (stream may start immediately)
   local job = self.server:request(opts)
 
-  if job and job:is_job() then
-    self.requesting = job --[[@as Job]]
+  if job and job:is_active() then
+    self.requesting = job
   end
 
   self:_after_begin()
@@ -907,32 +907,26 @@ function Chat:_generate_title_async(first_message)
     local server_key = naming_config.model
     title_server = ServerManager.servers[server_key]
   end
-  title_server = title_server or self.server
+  title_server = title_server or self.server --[[@as llm.OpenAIServer]]
 
-  -- Build curl command using server's method
-  local body = {
-    model = title_server.model,
-    messages = messages,
-    stream = false,
-    temperature = 0.4,
-    max_tokens = 100,
-  }
-  local curl_args = title_server:build_original_curl_args(body)
+  -- Build request using server:request for unified handling
+  local opts = title_server:build_request_opts(messages, { stream = false, temperature = 0.4, max_tokens = 100 })
 
-  -- Use vim.system to execute curl
-  self.session._title_generation_job = vim.system({ "curl", unpack(curl_args) }, { text = true }, function(obj)
-    vim.schedule(function()
-      self.session._title_generation_job = nil
-      if obj.code ~= 0 or not obj.stdout then
-        return
-      end
+  opts.callback = function(data)
+    self.session._title_generation_job = nil
+    if data.status ~= 200 then
+      return
+    end
 
-      local result = { body = obj.stdout, status = 200 }
-      local title = title_server:parse_direct_result(result)
+    local title = title_server:parse_direct_result(data)
+    if title then
       self.session.title = title
       self.session:save { silent = true }
-    end)
-  end)
+    end
+  end
+
+  -- Send request via unified request method
+  self.session._title_generation_job = title_server:request(opts)
 end
 
 ---@private
