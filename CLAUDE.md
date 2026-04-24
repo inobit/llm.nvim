@@ -71,7 +71,7 @@ lua/inobit/llm/
 **Chat Session Flow**:
 1. `api.new_chat()` → `ChatManager:new()` creates or reuses a session
 2. `win.lua` creates floating or vsplit windows based on `config.options.chat_layout`
-3. User input is captured, `server.lua` makes HTTP request via plenary.curl
+3. User input is captured, `server.lua` makes HTTP request via `vim.system`
 4. Streaming response is written to response buffer with `spinner.lua` feedback
 5. Session auto-saves via `session.lua` after each exchange
 
@@ -80,6 +80,8 @@ lua/inobit/llm/
 - `Server` (base) → `TranslateServer`
 Each level adds protocol-specific behavior (e.g., `OpenRouterServer` adds `HTTP-Referer` and `X-Title` headers).
 
+**Server HTTP Layer**: Uses `vim.system` to execute curl commands for HTTP requests. Streaming responses are handled via line-buffered stdout callbacks. The `Server:request()` method returns a job object with `kill()` and `is_active()` methods for lifecycle management.
+
 **Retry Mechanism**: Implemented in `chat.lua` using extmarks. Virtual text hint shown via `highlights.lua`. When user presses retry key (`r` by default), the message at cursor is resent with same context.
 
 **Session Forking**: Sessions can be forked from any previous round via `SessionManager:fork_session(source, round)`. Forked sessions inherit the specified number of messages and display with a `└` indicator in the session picker. The `forked_from` and `inherited_count` fields track provenance.
@@ -87,7 +89,7 @@ Each level adds protocol-specific behavior (e.g., `OpenRouterServer` adds `HTTP-
 **Reasoning Content Extraction**: For models that output reasoning (e.g., Claude thinking tags), `chat.lua` parses `<think>` tags during streaming, storing reasoning separately from the main response. The `reasoning_content` field in messages preserves this data for multi-round conversations.
 
 **Chat Lifecycle & State Management**: `ChatManager` maintains a table of active chats keyed by session ID. Each `Chat` instance tracks:
-- `requesting`: The active plenary.curl job (can be canceled for retry/override)
+- `requesting`: The active vim.system job (can be canceled for retry/override via `job:kill()`)
 - `start_think`/`start_answer`: Parser state for streaming responses
 - `current_response`: Accumulated response buffer during streaming
 - Window state via `win` field (response/input buffers and window IDs)
@@ -124,7 +126,8 @@ Test setup uses `scripts/minimal_init.lua` which adds plenary.nvim to runtime pa
 
 ### Dependencies
 
-- **Required**: [plenary.nvim](https://github.com/nvim-lua/plenary.nvim) (curl, Path, async)
+- **Required**: curl binary (for HTTP requests via vim.system)
+- **Required**: [plenary.nvim](https://github.com/nvim-lua/plenary.nvim) (Path, async utilities)
 - **Optional**: [render-markdown.nvim](https://github.com/MeanderingProgrammer/render-markdown.nvim) for markdown rendering in chat windows (set `vim.g.inobit_filetype = "inobit"`)
 - **Dev dependency**: plenary.nvim for tests
 
