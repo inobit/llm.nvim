@@ -111,7 +111,7 @@ function ChatManager:delete_chat(session)
 
   -- 1. Terminate ongoing request
   if chat.requesting then
-    chat:_close(1000)
+    chat:_close(true)
     chat.requesting = nil
   end
 
@@ -249,11 +249,12 @@ function Chat:_resume_session()
 end
 
 ---stop request
----@param signal llm.server.StopSignal
-function Chat:_close(signal)
+---@param should_kill boolean if true, kill the job; if false, just clear the reference
+---@param reason? string cancel reason to display in response window
+function Chat:_close(should_kill, reason)
   if self.requesting then
-    if signal ~= 0 then
-      self.requesting:kill(9)
+    if should_kill then
+      self.requesting:kill(9, reason)
     end
     self.requesting = nil
   end
@@ -274,7 +275,7 @@ function Chat:_register_stop_and_save_keymap()
   local bufnrs = { self.win.wins.input.bufnr, self.win.wins.response.bufnr }
   for _, bufnr in ipairs(bufnrs) do
     vim.keymap.set({ "n", "i" }, "<C-C>", function()
-      self:_close(1000)
+      self:_close(true, "User canceled")
     end, { buffer = bufnr, noremap = true, silent = true })
     vim.keymap.set({ "n", "i" }, "<C-S>", function()
       self.session:save()
@@ -948,7 +949,7 @@ function Chat:_after_stop()
   self.spinner:stop()
   self:_remove_stop_request_keymap()
   self:_register_submit_keymap()
-  self:_close(0)
+  self:_close(false)
 end
 
 function Chat:_init_response_status()
@@ -964,11 +965,7 @@ end
 
 ---@param error llm.server.Error
 function Chat:on_error(error)
-  local header = "[!CAUTION] Error!"
-  if error.exit == 1000 or error.exit == 1001 then
-    header = "[!WARNING] Warning!"
-  end
-  local err = string.format("%s%s%s", header, "\n", error.message)
+  local err = string.format("[!CAUTION] Error!\n%s", error.message)
   local err_lines = vim.split(err, "\n")
   err_lines = vim
     .iter(err_lines)
@@ -990,7 +987,6 @@ function Chat:parse_error(error)
   end
   ---@type llm.server.Error
   local err_obj = {
-    exit = 1002,
     message = error,
     stderr = "",
   }
@@ -1010,7 +1006,7 @@ end
 function Chat:on_stream(err, data)
   -- handle error
   if err then
-    self:on_error { message = err, stderr = "", exit = 0 }
+    self:on_error { message = err, stderr = "" }
     -- handle response data
   else
     self:_response_handler(data)

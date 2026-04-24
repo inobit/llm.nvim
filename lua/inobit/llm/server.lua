@@ -5,7 +5,7 @@ local notify = require "inobit.llm.notify"
 
 ---@class llm.RequestJob
 ---@field _job vim.SystemObj
----@field kill fun(self: llm.RequestJob, signal?: number)
+---@field kill fun(self: llm.RequestJob, signal?: number, reason?: string)
 ---@field is_active fun(self: llm.RequestJob): boolean
 ---@field pid number?
 
@@ -18,22 +18,14 @@ local notify = require "inobit.llm.notify"
 ---@field body? string
 ---@field headers? table<string, string>
 
----@alias llm.server.StopSignal
----| 0    normal
----| 1000 user canceled
----| 1001 new request override
----| 1002 parsing error
-
 ---@class llm.server.Error
 ---@field message string
 ---@field stderr string
----@field exit number
 
 ---@class llm.server.Response
 ---@field status number
 ---@field headers string[]
 ---@field body string
----@field exit number
 
 ---@class llm.Server: llm.server.ServerOptions
 local Server = {}
@@ -195,6 +187,8 @@ function Server:request(opts)
 
   local stderr_data = {}
 
+  local wrapper = {}
+
   local job = vim.system(cmd, {
     stdout = stream_callback,
     stderr = function(_, data)
@@ -203,12 +197,12 @@ function Server:request(opts)
       end
     end,
   }, function(obj)
-    if obj.code ~= 0 then
+    -- Normal exit: code=0, signal=0; Killed by signal: code=0, signal=signal_value
+    if obj.code ~= 0 or obj.signal ~= 0 then
       if error_callback then
         error_callback {
-          message = table.concat(stderr_data, ""),
+          message = wrapper.reason or table.concat(stderr_data, ""),
           stderr = table.concat(stderr_data, ""),
-          exit = obj.code,
         }
       end
     elseif exit_callback then
@@ -216,21 +210,22 @@ function Server:request(opts)
         status = 200,
         headers = {},
         body = obj.stdout or "",
-        exit = obj.code,
       }
     end
   end)
 
-  return {
-    _job = job,
-    pid = job.pid,
-    kill = function(self, sig)
-      self._job:kill(sig or 9)
-    end,
-    is_active = function(self)
-      return self._job.pid ~= nil
-    end,
-  }
+  wrapper._job = job
+  wrapper.pid = job.pid
+  wrapper.reason = nil
+  function wrapper:kill(sig, reason)
+    self.reason = reason
+    self._job:kill(sig or 9)
+  end
+  function wrapper:is_active()
+    return self._job.pid ~= nil
+  end
+
+  return wrapper
 end
 
 ---@param body table
