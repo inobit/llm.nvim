@@ -68,21 +68,21 @@ The plugin works out of the box with sensible defaults. To customize, pass optio
   main = "inobit/llm",
   -- Optional: custom keymaps
   keys = {
-    { "<leader>mc", "<Cmd>LLM Chat<CR>", desc = "LLM: chat start" },
-    { "<leader>ms", "<Cmd>LLM Sessions<CR>", desc = "LLM: select session" },
-    { "<leader>mv", "<Cmd>LLM ChatServers<CR>", desc = "LLM: select chat server" },
-    { "<leader>mt", "<Cmd>LLM TSServers<CR>", desc = "LLM: select translate server" },
+    { "<leader>at", "<Cmd>LLM Toggle<CR>", desc = "LLM: chat toggle" },
+    { "<leader>as", "<Cmd>LLM Sessions<CR>", desc = "LLM: select session" },
+    { "<leader>ap", "<Cmd>LLM ChatProviders<CR>", desc = "LLM: select chat provider" },
+    { "<leader>aP", "<Cmd>LLM TSProviders<CR>", desc = "LLM: select translate provider" },
     { "<leader>ts", function() require("inobit.llm.api").translate_in_buffer(true) end, mode = { "n", "v" }, desc = "LLM: translate and replace" },
     { "<leader>tc", function() require("inobit.llm.api").translate_in_buffer(true, "Z2E_CAMEL") end, mode = { "n", "v" }, desc = "LLM: translate to VAR_CAMEL" },
     { "<leader>tu", function() require("inobit.llm.api").translate_in_buffer(true, "Z2E_UNDERLINE") end, mode = { "n", "v" }, desc = "LLM: translate to VAR_UNDERLINE" },
     { "<leader>tp", function() require("inobit.llm.api").translate_in_buffer(false) end, mode = { "n", "v" }, desc = "LLM: translate and print" },
   },
   opts = {
-    -- Default server@model to use (format: "ServerName@model-name")
-    default_server = "OpenRouter@openai/gpt-4.5",
+    -- Default provider@model to use (format: "ProviderName@model-name")
+    default_provider = "OpenRouter@openai/gpt-4.5",
 
-    -- Default server for translation tasks
-    -- default_translate_server = "OpenRouter@google/gemini-2.5-flash",
+    -- Default provider for translation tasks
+    -- default_translate_provider = "OpenRouter@google/gemini-2.5-flash",
 
     -- Chat window layout: "float" (default) or "vsplit"
     chat_layout = "float",
@@ -97,11 +97,11 @@ The plugin works out of the box with sensible defaults. To customize, pass optio
       next_question = "]q",  -- Jump to next question
       prev_question = "[q",  -- Jump to previous question (supports wrap-around)
     },
-    servers = {
+    providers = {
       -- Example: Add more OpenRouter models
       {
-        server = "OpenRouter",
-        server_type = "chat",
+        provider = "OpenRouter",
+        provider_type = "chat",
         base_url = "https://openrouter.ai/api/v1/chat/completions",
         api_key_name = "OPENROUTER_API_KEY",
         stream = true,
@@ -118,10 +118,10 @@ The plugin works out of the box with sensible defaults. To customize, pass optio
         },
       },
 
-      -- Example: Add translation server (DeepL/DeepLX)
+      -- Example: Add translation provider (DeepL/DeepLX)
       {
-        server = "DeepL",
-        server_type = "translate",
+        provider = "DeepL",
+        provider_type = "translate",
         models = {
           {
             model = "DeepLX",
@@ -140,11 +140,11 @@ The plugin works out of the box with sensible defaults. To customize, pass optio
 ```lua
 -- lua/inobit/llm/config.lua
 
-local function default_servers()
+local function default_providers()
   return {
     {
-      server = "OpenRouter",
-      server_type = "chat",
+      provider = "OpenRouter",
+      provider_type = "chat",
       base_url = "https://openrouter.ai/api/v1/chat/completions",
       api_key_name = "OPENROUTER_API_KEY",
       stream = true,
@@ -162,7 +162,7 @@ end
 
 function M.defaults()
   return {
-    default_server = "OpenRouter@openai/gpt-4.5",
+    default_provider = "OpenRouter@openai/gpt-4.5",
     chat_layout = "float",
     loading_mark = "**Generating response ...**",
     user_prompt = "❯",
@@ -186,7 +186,7 @@ function M.defaults()
       content_height_percentage = 0.3,
       winblend = 5,
     },
-    server_picker_win = {
+    provider_picker_win = {
       width_percentage = 0.3,
       input_height = 1,
       content_height_percentage = 0.2,
@@ -203,23 +203,23 @@ end
 
 ### Commands
 
-| Command            | Description                         |
-| ------------------ | ----------------------------------- |
-| `:LLM Chat`        | Start a new chat session            |
-| `:LLM Sessions`    | Select and manage existing sessions |
-| `:LLM ChatServers` | Select chat server (model)          |
-| `:LLM TSServers`   | Select translation server           |
+| Command              | Description                         |
+| -------------------- | ----------------------------------- |
+| `:LLM Chat`          | Start a new chat session            |
+| `:LLM Sessions`      | Select and manage existing sessions |
+| `:LLM ChatProviders` | Select chat provider (model)        |
+| `:LLM TSProviders`   | Select translation provider         |
 
 ### Chat Window Keymaps
 
-| Key       | Action                                                          |
-| --------- | --------------------------------------------------------------- |
-| `<C-C>`   | End current session                                             |
-| `<C-S>`   | Save current session                                            |
-| `<C-N>`   | Create new session                                              |
-| `[q`      | Go to previous question (wrap)                                  |
-| `]q`      | Go to next question (wrap)                                      |
-| `r`       | Retry the question under cursor (when virtual text hint shows)  |
+| Key     | Action                                                         |
+| ------- | -------------------------------------------------------------- |
+| `<C-C>` | End current session                                            |
+| `<C-S>` | Save current session                                           |
+| `<C-N>` | Create new session                                             |
+| `[q`    | Go to previous question (wrap)                                 |
+| `]q`    | Go to next question (wrap)                                     |
+| `r`     | Retry the question under cursor (when virtual text hint shows) |
 
 ### Session Picker Keymaps
 
