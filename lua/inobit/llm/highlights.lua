@@ -27,15 +27,19 @@ M.setup_highlight()
 
 ---@param buf integer
 ---@param start_row integer 0-indexed
----@param end_row integer 0-indexed (exclusive)
+---@param end_row integer 0-indexed (empty line index, user message ends at end_row-1)
 ---@param message_index integer index in session.content
 function M.set_user_message_extmark(buf, start_row, end_row, message_index)
+  -- Extmark for retry detection: covers user message only (start_row to end_row-1)
+  -- end_row is the empty line index, extmark's end_row is exclusive so actual range is [start_row, end_row-1]
   vim.api.nvim_buf_set_extmark(buf, NAMESPACE, start_row, 0, {
-    end_row = end_row,
+    end_row = end_row, -- exclusive: covers user message, excludes empty line
     id = message_index,
-    hl_group = "InobitQuestion",
-    hl_eol = true,
   })
+
+  -- Highlight user message content only, exclude empty line
+  -- end_row-1 is the actual last line of user message
+  vim.highlight.range(buf, NAMESPACE, "InobitQuestion", { start_row, 0 }, { end_row - 1, -1 }, { inclusive = true })
 end
 
 ---@param buf integer
