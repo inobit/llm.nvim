@@ -4,6 +4,7 @@ local SessionManager = require "inobit.llm.session"
 local ServerManager = require "inobit.llm.server"
 local win = require "inobit.llm.win"
 local hl = require "inobit.llm.highlights"
+local notify = require "inobit.llm.notify"
 local Spinner = require("inobit.llm.spinner").FloatSpinner
 
 local RETRY_NAMESPACE = hl.NAMESPACE
@@ -31,6 +32,12 @@ local RETRY_HINT_EXTMARK_ID = 999999999 -- special id for retry hint virtual tex
 ---@field current_response_reasoning llm.session.Message
 local Chat = {}
 Chat.__index = Chat
+
+--- Check if Chat is in the foreground (window active)
+---@return boolean
+function Chat:is_foreground()
+  return vim.api.nvim_win_is_valid(self.win.wins.response.winid) or vim.api.nvim_win_is_valid(self.win.wins.input.winid)
+end
 
 ---@class llm.chat.ChatManager
 ---@field chats table<string, llm.Chat>
@@ -97,8 +104,33 @@ end
 
 ---@param session llm.SessionIndex
 function ChatManager:delete_chat(session)
-  ChatManager.chats[session.id] = nil
-  if self.last_used_chat and self.last_used_chat.session.id == session.id then
+  local chat = self.chats[session.id]
+  if not chat then
+    return
+  end
+
+  -- 1. Terminate ongoing request
+  if chat.requesting then
+    chat:_close(1000)
+    chat.requesting = nil
+  end
+
+  -- 2. Cancel title generation job
+  if chat.session and chat.session._title_generation_job then
+    pcall(chat.session._title_generation_job.kill, chat.session._title_generation_job, "sigterm")
+    chat.session._title_generation_job = nil
+  end
+
+  -- 3. Close windows if foreground
+  if chat:is_foreground() then
+    -- Close chat windows
+    pcall(vim.api.nvim_win_close, chat.win.wins.input.winid, true)
+    pcall(vim.api.nvim_win_close, chat.win.wins.response.winid, true)
+  end
+
+  -- 4. Remove from chat manager
+  self.chats[session.id] = nil
+  if self.last_used_chat == chat then
     self.last_used_chat = nil
   end
 end
@@ -163,7 +195,7 @@ function Chat:_set_header()
   local headers = {
     string.format("- **server@model**: %s@%s", self.session.server, self.session.model),
     string.format("- **create time**: %s", os.date("%Y-%m-%d %H:%M:%S", self.session.create_time)),
-    string.format("- **session name**: %s", self.session.name),
+    string.format("- **session title**: %s", self.session.title),
     string.format("- **session id**: %s", self.session.id),
   }
   if vim.api.nvim_buf_get_lines(self.win.wins.response.bufnr, 0, 1, false)[1] ~= "" then
@@ -264,10 +296,104 @@ function Chat:_register_new_chat_keymap()
   local bufnrs = { self.win.wins.input.bufnr, self.win.wins.response.bufnr }
   for _, bufnr in ipairs(bufnrs) do
     vim.keymap.set({ "n", "i" }, "<C-N>", function()
-      -- force creation of new chat
-      ChatManager:new(SessionManager:new_session(ServerManager.chat_server.server, ServerManager.chat_server.model))
+      -- Check if current session has content
+      if #self.session.content > 0 then
+        self:_prompt_fork_or_new()
+      else
+        -- Empty session, create new one directly
+        ChatManager:new(SessionManager:new_session(ServerManager.chat_server.server, ServerManager.chat_server.model))
+      end
     end, { buffer = bufnr, noremap = true, silent = true })
   end
+end
+
+---@private
+function Chat:_prompt_fork_or_new()
+  local choices = {
+    "n. New session",
+    "5. Fork last 5 rounds",
+    "10. Fork last 10 rounds",
+    "a. Fork all",
+    "c. Custom range",
+  }
+
+  vim.ui.select(choices, {
+    prompt = "Continue based on existing session?",
+  }, function(choice)
+    if not choice then
+      return
+    end
+
+    local new_session
+    local total_rounds = math.floor(#self.session.content / 2)
+    if choice:match "^n" then
+      -- New session
+      new_session = SessionManager:new_session(ServerManager.chat_server.server, ServerManager.chat_server.model)
+    elseif choice:match "^5" then
+      -- Fork last 5 rounds
+      new_session =
+        SessionManager:fork_session(self.session, { start = math.max(1, total_rounds - 4), ["end"] = total_rounds })
+    elseif choice:match "^10" then
+      -- Fork last 10 rounds
+      new_session =
+        SessionManager:fork_session(self.session, { start = math.max(1, total_rounds - 9), ["end"] = total_rounds })
+    elseif choice:match "^a" then
+      -- Fork all
+      new_session = SessionManager:fork_session(self.session, "all")
+    elseif choice:match "^c" then
+      -- Custom range
+      self:_prompt_custom_fork_range()
+      return
+    end
+
+    if new_session then
+      ChatManager:new(new_session)
+    end
+  end)
+end
+
+---@private
+function Chat:_prompt_custom_fork_range()
+  local total_msgs = #self.session.content
+  local total_rounds = math.floor(total_msgs / 2)
+
+  vim.ui.input({
+    prompt = string.format("Enter round(s) (1-%d, e.g., 3, 3-5, or 2-): ", total_rounds),
+  }, function(input)
+    if not input or input == "" then
+      return
+    end
+
+    -- Parse: single round "3" or range "start-end" or "start-"
+    local start_round, end_round = input:match "^(%d+)%s*%-?%s*(%d*)$"
+    if not start_round then
+      notify.warn("invalid format", "use format: 3, 3-5, or 2-")
+      return
+    end
+
+    start_round = tonumber(start_round)
+    -- If no end specified, use start_round (single round)
+    end_round = end_round ~= "" and tonumber(end_round) or start_round
+
+    if not start_round or start_round < 1 or start_round > total_rounds then
+      notify.warn("invalid start round", string.format("must be between 1 and %d", total_rounds))
+      return
+    end
+
+    if end_round < start_round or end_round > total_rounds then
+      notify.warn("invalid end round", string.format("must be between %d and %d", start_round, total_rounds))
+      return
+    end
+
+    -- Convert round numbers to message indices (each round = 2 messages)
+    local start_idx = (start_round - 1) * 2 + 1
+    local end_idx = end_round * 2
+
+    local new_session = SessionManager:fork_session(self.session, { start = start_idx, ["end"] = end_idx })
+    if new_session then
+      ChatManager:new(new_session)
+    end
+  end)
 end
 
 ---@private
@@ -315,11 +441,11 @@ function Chat:_register_nav_keymaps()
   local nav = config.options.nav
 
   vim.keymap.set("n", nav.next_question, function()
-    self:_navigate_to_question("next")
+    self:_navigate_to_question "next"
   end, { buffer = bufnr, noremap = true, silent = true, desc = "LLM: go to next question" })
 
   vim.keymap.set("n", nav.prev_question, function()
-    self:_navigate_to_question("prev")
+    self:_navigate_to_question "prev"
   end, { buffer = bufnr, noremap = true, silent = true, desc = "LLM: go to previous question" })
 end
 
@@ -701,8 +827,112 @@ function Chat:_clean_current_request_turn()
   then
     table.remove(self.session.content, len - 1)
   end
+
+  -- smart naming trigger
+  self:_maybe_generate_title()
+
   -- auto save
   self.session:save()
+end
+
+---@private
+function Chat:_maybe_generate_title()
+  -- 1. Check if title has been manually changed (not default id)
+  if self.session.title ~= self.session.id then
+    return
+  end
+
+  -- 2. Check if first round completed (exactly 2 messages: user + AI)
+  if #self.session.content ~= 2 then
+    return
+  end
+
+  -- 3. Check message structure
+  local first_msg = self.session.content[1]
+  local second_msg = self.session.content[2]
+  if first_msg.role ~= (self.server.user_role or "user") then
+    return
+  end
+  if second_msg.role == (self.server.user_role or "user") then
+    return
+  end
+
+  -- 4. Check message length threshold and smart naming enabled
+  local naming_config = config.options.smart_naming
+
+  local msg_length = vim.fn.strchars(first_msg.content)
+
+  local smart_naming_enabled = naming_config.enabled
+
+  if msg_length < naming_config.min_length or not smart_naming_enabled then
+    -- Use first max_length chars as title (fallback)
+    local fallback_title = first_msg.content:sub(1, naming_config.max_length)
+    -- Remove newlines and extra spaces
+    fallback_title = fallback_title:gsub("%s+", " "):gsub("^%s*(.-)%s*$", "%1")
+    if #fallback_title > 0 then
+      self.session.title = fallback_title
+      self.session:save { silent = true }
+    end
+    return
+  end
+
+  -- 5. Use AI generation for long messages with smart naming enabled
+  self:_generate_title_async(first_msg.content)
+end
+
+---@private
+---@return boolean
+function Chat:_is_first_round_after_fork()
+  if not self.session.forked_from then
+    return false
+  end
+  return #self.session.content == self.session.inherited_count + 2
+end
+
+---@private
+---@param first_message string
+function Chat:_generate_title_async(first_message)
+  local naming_config = config.options.smart_naming
+
+  local messages = {
+    {
+      role = "user",
+      content = string.format(naming_config.prompt, naming_config.max_length, first_message),
+    },
+  }
+
+  -- Use specified light model or fallback to main server
+  local title_server
+  if naming_config.model then
+    local server_key = naming_config.model
+    title_server = ServerManager.servers[server_key]
+  end
+  title_server = title_server or self.server
+
+  -- Build curl command using server's method
+  local body = {
+    model = title_server.model,
+    messages = messages,
+    stream = false,
+    temperature = 0.4,
+    max_tokens = 100,
+  }
+  local curl_args = title_server:build_original_curl_args(body)
+
+  -- Use vim.system to execute curl
+  self.session._title_generation_job = vim.system({ "curl", unpack(curl_args) }, { text = true }, function(obj)
+    vim.schedule(function()
+      self.session._title_generation_job = nil
+      if obj.code ~= 0 or not obj.stdout then
+        return
+      end
+
+      local result = { body = obj.stdout, status = 200 }
+      local title = title_server:parse_direct_result(result)
+      self.session.title = title
+      self.session:save { silent = true }
+    end)
+  end)
 end
 
 ---@private
