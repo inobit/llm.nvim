@@ -12,6 +12,8 @@ function M.setup(opts)
     local command = args[1]
     if command == "Chat" then
       api.new_chat()
+    elseif command == "Toggle" then
+      api.toggle_chat()
     elseif command == "Sessions" then
       api.open_session_selector()
     elseif command == "ChatServers" then

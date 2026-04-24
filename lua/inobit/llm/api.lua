@@ -91,4 +91,18 @@ M.translate_in_lsp = translate.translate_in_lsp
 
 M.is_translating = translate.get_translate_status
 
+M.toggle_chat = function()
+  local last_chat = ChatManager.last_used_chat
+
+  -- If there's a foreground chat, close it; otherwise open new (or restore last)
+  if last_chat and last_chat:is_foreground() then
+    local response_win = last_chat.win.wins.response.winid
+    local input_win = last_chat.win.wins.input.winid
+    pcall(vim.api.nvim_win_close, input_win, true)
+    pcall(vim.api.nvim_win_close, response_win, true)
+  else
+    ChatManager:new()
+  end
+end
+
 return M
