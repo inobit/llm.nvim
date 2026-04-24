@@ -223,8 +223,8 @@ function Chat:_resume_session()
         local start_line = vim.api.nvim_buf_line_count(self.win.wins.response.bufnr)
         self:_write_lines_to_response(self:_build_input_render_style(vim.split(message.content, "\n")))
         local end_line = vim.api.nvim_buf_line_count(self.win.wins.response.bufnr)
-        -- Set extmark with highlight for this user message
-        self:_set_user_message_extmark(start_line, end_line, idx)
+        -- Set extmark with highlight for this user message (end_row exclusive, so use end_line - 1 to exclude empty line)
+        self:_set_user_message_extmark(start_line, end_line - 1, idx)
       else
         -- assistant message
         if message.reasoning_content then
@@ -642,8 +642,8 @@ function Chat:_submit_message(message, is_new_message, input_lines)
       self:_write_lines_to_response(self:_build_input_render_style(vim.split(message.content, "\n")))
     end
     local end_line = vim.api.nvim_buf_line_count(self.win.wins.response.bufnr)
-    -- Set extmark with highlight for this user message
-    self:_set_user_message_extmark(start_line, end_line, user_message_index)
+    -- Set extmark with highlight for this user message (end_row exclusive, so use end_line - 1 to exclude empty line)
+    self:_set_user_message_extmark(start_line, end_line - 1, user_message_index)
   end
 
   -- send request (stream may start immediately)
