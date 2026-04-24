@@ -49,6 +49,13 @@ local Path = require "plenary.path"
 ---@field next_question string
 ---@field prev_question string
 
+---@class llm.SmartNamingConfig
+---@field enabled boolean
+---@field model string
+---@field max_length number
+---@field min_length number
+---@field prompt string
+
 ---@class llm.Config
 ---@field servers table<string, llm.server.ServerOptions>
 ---@field default_server string
@@ -68,6 +75,7 @@ local Path = require "plenary.path"
 ---@field nav llm.NavOptions
 ---@field retry_key string
 ---@field retry_hint_text string
+---@field smart_naming llm.SmartNamingConfig
 
 ---@return llm.config.ServerOptions[]
 local function default_servers()
@@ -85,6 +93,7 @@ local function default_servers()
         { model = "anthropic/claude-opus-4", temperature = 0.4 },
         { model = "openai/gpt-4.5", temperature = 0.4 },
         { model = "google/gemini-3-pro", max_tokens = 8192, temperature = 0.4 },
+        { model = "google/gemini-2.5-flash-lite", max_tokens = 4096, temperature = 0.4 },
       },
     },
   }
@@ -126,6 +135,13 @@ function M.defaults()
     nav = {
       next_question = "]q",
       prev_question = "[q",
+    },
+    smart_naming = {
+      enabled = true,
+      model = "OpenRouter@google/gemini-2.5-flash-lite",
+      max_length = 15,
+      min_length = 20, -- recommended 20
+      prompt = "Summarize the topic of this conversation in no more than %d words: %s",
     },
   }
 end
@@ -198,6 +214,7 @@ end
 ---@field nav? llm.NavOptions
 ---@field retry_key? string
 ---@field retry_hint_text? string
+---@field smart_naming? llm.SmartNamingConfig
 
 ---@param options? llm.SetupOptions
 function M.setup(options)
