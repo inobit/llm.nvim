@@ -1,23 +1,10 @@
 ---@diagnostic disable: redefined-local
 local log = require "inobit.llm.log"
 local Path = require "plenary.path"
-local Job = require "plenary.job"
 local uv = vim.uv or vim.loop
 local default_mod = 438 --0666
 
 local M = {}
-
-function M.stream_curl(args, handle_prev, handle_response, handle_post)
-  local active_job = Job:new {
-    command = "curl",
-    args = args,
-    on_start = handle_prev,
-    on_stdout = handle_response,
-    on_stderr = handle_response,
-    on_exit = handle_post,
-  }
-  return active_job
-end
 
 function M.read_json(path)
   local fd, err, errcode = uv.fs_open(path, "r", default_mod)
