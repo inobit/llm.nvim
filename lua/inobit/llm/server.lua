@@ -1,23 +1,22 @@
 local config = require "inobit.llm.config"
 local win = require "inobit.llm.win"
 local util = require "inobit.llm.util"
-local curl = require "plenary.curl"
 local notify = require "inobit.llm.notify"
 
----https://github.com/nvim-lua/plenary.nvim/blob/master/lua/plenary/curl.lua#L201
----@alias llm.server.plenaryCurlArgs
----| "url"
----| "method"
----| "body"
----| "headers"
----| "accept"
----| "in_file"
+---@class llm.RequestJob
+---@field _job vim.SystemObj
+---@field kill fun(self: llm.RequestJob, signal?: number)
+---@field is_active fun(self: llm.RequestJob): boolean
+---@field pid number?
 
 ---@class llm.server.RequestOpts
 ---@field callback? fun(data: llm.server.Response)
----@field stream? fun(error: string, data: string, self?: Job)
+---@field stream? fun(error: string, data: string)
 ---@field on_error? fun(err: llm.server.Error)
----@field [llm.server.plenaryCurlArgs] any
+---@field url string
+---@field method? string
+---@field body? string
+---@field headers? table<string, string>
 
 ---@alias llm.server.StopSignal
 ---| 0    normal
@@ -134,44 +133,124 @@ function Server:_check_api_key()
   end
 end
 
----build original curl request,can used for plenary Job:new
----@param body any
----@return string[]
-function Server:build_original_curl_args(body)
-  local args = {
-    self.base_url,
+---Buffer stdout data and split by lines for SSE processing
+---@param callback fun(error: string?, data: string?)
+---@return fun(_: any, data: string?)
+function Server:_make_line_buffer(callback)
+  local buffer = ""
+  return function(_, data)
+    if not data then
+      if buffer ~= "" then
+        callback(nil, buffer)
+      end
+      return
+    end
+    buffer = buffer .. data
+    while true do
+      local newline_pos = buffer:find "\n"
+      if not newline_pos then
+        break
+      end
+      local line = buffer:sub(1, newline_pos - 1)
+      buffer = buffer:sub(newline_pos + 1)
+      callback(nil, line)
+    end
+  end
+end
+
+---send request to server
+---@param opts llm.server.RequestOpts
+---@return llm.RequestJob | nil
+function Server:request(opts)
+  local auth = vim.fn.getenv(self.api_key_name)
+  if not auth or auth == vim.NIL then
+    self:_check_api_key()
+    return nil
+  end
+
+  local body = opts.body
+  local headers = opts.headers or {}
+  local cmd = {
+    "curl",
+    "-sS",
     "-N",
     "-X",
-    "POST",
+    opts.method or "POST",
     "-H",
-    "Content-Type: application/json",
+    "Content-Type: " .. (headers.content_type or "application/json"),
     "-H",
-    "Authorization: Bearer " .. vim.fn.getenv(self.api_key_name),
-    "-d",
-    vim.fn.json_encode(body),
+    "Authorization: " .. (headers.authorization or ""),
   }
-  return args
+
+  if body then
+    table.insert(cmd, "-d")
+    table.insert(cmd, body)
+  end
+
+  table.insert(cmd, opts.url)
+
+  local stream_callback = opts.stream and self:_make_line_buffer(vim.schedule_wrap(opts.stream))
+  local error_callback = opts.on_error and vim.schedule_wrap(opts.on_error)
+  local exit_callback = opts.callback and vim.schedule_wrap(opts.callback)
+
+  local stderr_data = {}
+
+  local job = vim.system(cmd, {
+    stdout = stream_callback,
+    stderr = function(_, data)
+      if data then
+        table.insert(stderr_data, data)
+      end
+    end,
+  }, function(obj)
+    if obj.code ~= 0 then
+      if error_callback then
+        error_callback {
+          message = table.concat(stderr_data, ""),
+          stderr = table.concat(stderr_data, ""),
+          exit = obj.code,
+        }
+      end
+    elseif exit_callback then
+      exit_callback {
+        status = 200,
+        headers = {},
+        body = obj.stdout or "",
+        exit = obj.code,
+      }
+    end
+  end)
+
+  return {
+    _job = job,
+    pid = job.pid,
+    kill = function(self, sig)
+      self._job:kill(sig or 9)
+    end,
+    is_active = function(self)
+      return self._job.pid ~= nil
+    end,
+  }
 end
 
 ---@param body table
----@param curl_args? table<llm.server.plenaryCurlArgs,any>
 ---@return llm.server.RequestOpts
-function Server:build_request_opts(body, curl_args)
+function Server:build_request_opts(body)
   ---@type string?
   local auth = vim.fn.getenv(self.api_key_name)
   if not auth or auth == vim.NIL then
-    -- check the api_key when request
     auth = ""
   end
   local headers = {
     content_type = "application/json",
     authorization = "Bearer " .. auth,
   }
-  return vim.tbl_deep_extend(
-    "keep",
-    { url = self.base_url, body = vim.fn.json_encode(body), headers = headers },
-    curl_args or { method = "POST" }
-  )
+  return {
+    url = self.base_url,
+    body = vim.fn.json_encode(body),
+    headers = headers,
+    method = "POST",
+  }
 end
 
 ---@return string
@@ -179,12 +258,10 @@ function Server:get_reasoning_content_key()
   return "reasoning_content"
 end
 
----build curl request,used for plenary curl
 ---@param input llm.session.Message[]
 ---@param server_params? llm.server.BaseOptions
----@param curl_args? table<llm.server.plenaryCurlArgs,any>
 ---@return llm.server.RequestOpts
-function OpenAIServer:build_request_opts(input, server_params, curl_args)
+function OpenAIServer:build_request_opts(input, server_params)
   local body = vim.tbl_deep_extend("force", {}, {
     model = self.model,
     messages = input,
@@ -192,18 +269,17 @@ function OpenAIServer:build_request_opts(input, server_params, curl_args)
     temperature = self.temperature or 0.6,
     max_tokens = self.max_tokens or 4096,
   }, server_params or {})
-  return Server.build_request_opts(self, body, curl_args)
+  return Server.build_request_opts(self, body)
 end
 
 ---@param input llm.session.Message[]
 ---@param server_params? llm.server.BaseOptions
----@param curl_args? table<llm.server.plenaryCurlArgs,any>
 ---@return llm.server.RequestOpts
-function OpenRouterServer:build_request_opts(input, server_params, curl_args)
+function OpenRouterServer:build_request_opts(input, server_params)
   server_params = server_params or {}
   local reasoning = vim.tbl_deep_extend("force", vim.empty_dict(), self.reasoning or {}, server_params.reasoning or {})
   server_params.reasoning = reasoning
-  return OpenAIServer.build_request_opts(self, input, server_params, curl_args)
+  return OpenAIServer.build_request_opts(self, input, server_params)
 end
 
 ---@return string
@@ -244,10 +320,9 @@ function OpenRouterServer:parse_direct_result(data)
 end
 
 ---@param body llm.server.deepl.text.RequestBody
----@param curl_args? table<llm.server.plenaryCurlArgs,any>
 ---@return llm.server.RequestOpts
-function DeepLServer:build_request_opts(body, curl_args)
-  return Server.build_request_opts(self, body, curl_args)
+function DeepLServer:build_request_opts(body)
+  return Server.build_request_opts(self, body)
 end
 
 function DeepLServer:clean_source_text(text)
@@ -259,40 +334,6 @@ end
 function DeepLServer:parse_translation_result(data)
   local body = vim.json.decode(data.body, { luanil = { object = true, array = true } })
   return body
-end
-
----send request to server
----@param opts llm.server.RequestOpts
----@return Job | llm.server.Response | nil
-function Server:request(opts)
-  local auth = vim.fn.getenv(self.api_key_name)
-  if not auth or auth == vim.NIL then
-    self:_check_api_key()
-  else
-    if opts.callback then
-      opts.callback = vim.schedule_wrap(opts.callback)
-    end
-    if opts.stream then
-      opts.stream = vim.schedule_wrap(opts.stream)
-    end
-    if opts.on_error then
-      ---@type fun(err: llm.server.Error)
-      local error_callback = opts.on_error
-      opts.on_error = vim.schedule_wrap(
-        ---@param error llm.server.Error
-        function(error)
-          if error.exit == 1000 then
-            error.message = "user canceled!"
-          elseif error.exit == 1001 then
-            error.message = "new request override!"
-          end
-          error_callback(error)
-        end
-      )
-    end
-    local job = curl.request(opts)
-    return job
-  end
 end
 
 ---handle stream chunk, common mode(openai mode)
