@@ -1,22 +1,22 @@
 local config = require "inobit.llm.config"
 local log = require "inobit.llm.log"
 
-describe("Server Manager", function()
-  local test_server_url = "http://localhost:8000/ai_stream"
+describe("Provider Manager", function()
+  local test_provider_url = "http://localhost:8000/ai_stream"
   config.setup {
-    servers = {
+    providers = {
       {
-        server = "test_server",
-        server_type = "chat",
-        base_url = test_server_url,
+        provider = "test_provider",
+        provider_type = "chat",
+        base_url = test_provider_url,
         api_key_name = "TEST_API_KEY",
         models = { "test-model" },
         stream = true,
       },
     },
-    default_server = "test_server@test-model",
+    default_provider = "test_provider@test-model",
   }
-  local ServerManager = require "inobit.llm.server"
+  local ProviderManager = require "inobit.llm.provider"
 
   before_each(function()
     vim.fn.setenv("TEST_API_KEY", "test-api-key")
@@ -27,8 +27,8 @@ describe("Server Manager", function()
   end)
 
   it("should build correct curl arguments", function()
-    local server = ServerManager.default_server --[[@as llm.OpenAIServer]]
-    local args = server:build_request_opts({
+    local provider = ProviderManager.default_provider --[[@as llm.OpenAIServer]]
+    local args = provider:build_request_opts({
       { role = "user", content = "test" },
     }, nil)
     assert.equals(
