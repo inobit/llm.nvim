@@ -137,7 +137,7 @@ end
 ---build original curl request,can used for plenary Job:new
 ---@param body any
 ---@return string[]
-function Server:_build_original_curl_args(body)
+function Server:build_original_curl_args(body)
   local args = {
     self.base_url,
     "-N",
@@ -224,6 +224,23 @@ function OpenAIServer:parse_translation_result(data)
   else
     notify.error(string.format("no translation result found: %s", vim.json.encode(data.body)))
   end
+end
+
+---@param data llm.server.Response
+---@return string?
+function OpenAIServer:parse_direct_result(data)
+  local body = vim.json.decode(data.body)
+  local content = vim.tbl_get(body, "choices", 1, "message", "content")
+  if content then
+    return content:gsub("%s+$", "")
+  end
+  return nil
+end
+
+---@param data llm.server.Response
+---@return string?
+function OpenRouterServer:parse_direct_result(data)
+  return OpenAIServer.parse_direct_result(self, data)
 end
 
 ---@param body llm.server.deepl.text.RequestBody
