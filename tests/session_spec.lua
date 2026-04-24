@@ -27,15 +27,15 @@ describe("SessionManager", function()
   end)
 
   it("able to create new sessions", function()
-    local session = SessionManager:new_session("test_server", "test_model")
+    local session = SessionManager:new_session("test_provider", "test_model")
 
-    assert.equals("test_server", session.server)
+    assert.equals("test_provider", session.provider)
     assert.equals("test_model", session.model)
     assert.not_nil(session.id)
   end)
 
   it("it should be able to save and load sessions", function()
-    local session = SessionManager:new_session("test_server", "test_model")
+    local session = SessionManager:new_session("test_provider", "test_model")
     session:add_message { role = "user", content = "test" }
     session:save()
 
@@ -53,7 +53,7 @@ describe("SessionManager", function()
   end)
 
   it("messages should be deletable.", function()
-    local session = SessionManager:new_session("test_server", "test_model")
+    local session = SessionManager:new_session("test_provider", "test_model")
     local session_id = session.id
 
     session:delete()
@@ -61,7 +61,7 @@ describe("SessionManager", function()
   end)
 
   it("it should be able to rename session", function()
-    local session = SessionManager:new_session("test_server", "test_model")
+    local session = SessionManager:new_session("test_provider", "test_model")
     session.content = { { "test content" } }
     session:rename "new_title"
     assert.equals("new_title", SessionManager.session_list[session.id].title)

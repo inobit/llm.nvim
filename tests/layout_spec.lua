@@ -72,12 +72,12 @@ describe("Chat Layout", function()
 
     it("should create SplitChatWin with correct structure", function()
       local chat_win = win_module.SplitChatWin:new {
-        title = "TestServer@test-model",
+        title = "TestProvider@test-model",
       }
 
       assert.is_not_nil(chat_win)
       assert.is_not_nil(chat_win.id)
-      assert.equals("TestServer@test-model", chat_win.title)
+      assert.equals("TestProvider@test-model", chat_win.title)
       assert.is_not_nil(chat_win.wins)
       assert.is_not_nil(chat_win.wins.response)
       assert.is_not_nil(chat_win.wins.input)
@@ -85,7 +85,7 @@ describe("Chat Layout", function()
 
     it("should create response and input windows with valid bufnr and winid", function()
       local chat_win = win_module.SplitChatWin:new {
-        title = "TestServer@test-model",
+        title = "TestProvider@test-model",
       }
 
       -- Response window
@@ -105,7 +105,7 @@ describe("Chat Layout", function()
       local original_col = vim.api.nvim_win_get_position(original_win)[2]
 
       local chat_win = win_module.SplitChatWin:new {
-        title = "TestServer@test-model",
+        title = "TestProvider@test-model",
       }
 
       -- Get response window position
@@ -120,7 +120,7 @@ describe("Chat Layout", function()
       local expected_width = math.floor(vim.o.columns * config.options.vsplit_win.width_percentage)
 
       local chat_win = win_module.SplitChatWin:new {
-        title = "TestServer@test-model",
+        title = "TestProvider@test-model",
       }
 
       local response_width = vim.api.nvim_win_get_width(chat_win.wins.response.winid)
@@ -132,7 +132,7 @@ describe("Chat Layout", function()
       vim.g.inobit_filetype = "inobit"
 
       local chat_win = win_module.SplitChatWin:new {
-        title = "TestServer@test-model",
+        title = "TestProvider@test-model",
       }
 
       assert.equals("inobit", vim.api.nvim_get_option_value("filetype", { buf = chat_win.wins.response.bufnr }))
@@ -141,7 +141,7 @@ describe("Chat Layout", function()
 
     it("should set wrap option on response window", function()
       local chat_win = win_module.SplitChatWin:new {
-        title = "TestServer@test-model",
+        title = "TestProvider@test-model",
       }
 
       local wrap = vim.api.nvim_get_option_value("wrap", { win = chat_win.wins.response.winid })
@@ -150,7 +150,7 @@ describe("Chat Layout", function()
 
     it("should focus input window after creation", function()
       local chat_win = win_module.SplitChatWin:new {
-        title = "TestServer@test-model",
+        title = "TestProvider@test-model",
       }
 
       local current_win = vim.api.nvim_get_current_win()
@@ -159,7 +159,7 @@ describe("Chat Layout", function()
 
     it("should register close keymap (q) on both buffers", function()
       local chat_win = win_module.SplitChatWin:new {
-        title = "TestServer@test-model",
+        title = "TestProvider@test-model",
       }
 
       -- Check that 'q' keymap exists on both buffers
@@ -179,7 +179,7 @@ describe("Chat Layout", function()
 
     it("should register Tab keymap for window navigation", function()
       local chat_win = win_module.SplitChatWin:new {
-        title = "TestServer@test-model",
+        title = "TestProvider@test-model",
       }
 
       -- Check that Tab keymap exists
@@ -193,7 +193,7 @@ describe("Chat Layout", function()
 
     it("should close both windows when response buffer is closed", function()
       local chat_win = win_module.SplitChatWin:new {
-        title = "TestServer@test-model",
+        title = "TestProvider@test-model",
       }
 
       local response_winid = chat_win.wins.response.winid
@@ -209,7 +209,7 @@ describe("Chat Layout", function()
     it("should support reusing existing buffers", function()
       -- Create initial chat
       local chat_win1 = win_module.SplitChatWin:new {
-        title = "TestServer@test-model",
+        title = "TestProvider@test-model",
       }
       local response_bufnr = chat_win1.wins.response.bufnr
       local input_bufnr = chat_win1.wins.input.bufnr
@@ -220,7 +220,7 @@ describe("Chat Layout", function()
 
       -- Create new chat with existing buffers (simulates window refresh)
       local chat_win2 = win_module.SplitChatWin:new {
-        title = "TestServer@test-model",
+        title = "TestProvider@test-model",
         response_bufnr = response_bufnr,
         input_bufnr = input_bufnr,
       }
@@ -237,7 +237,7 @@ describe("Chat Layout", function()
     it("should call close_prev_handler before closing", function()
       local called = false
       local chat_win = win_module.SplitChatWin:new {
-        title = "TestServer@test-model",
+        title = "TestProvider@test-model",
         close_prev_handler = function()
           called = true
         end,
@@ -252,7 +252,7 @@ describe("Chat Layout", function()
     it("should call close_post_handler after closing", function()
       local called = false
       local chat_win = win_module.SplitChatWin:new {
-        title = "TestServer@test-model",
+        title = "TestProvider@test-model",
         close_post_handler = function()
           called = true
         end,
@@ -266,7 +266,7 @@ describe("Chat Layout", function()
 
     it("should auto-skip to input when entering insert mode in response buffer", function()
       local chat_win = win_module.SplitChatWin:new {
-        title = "TestServer@test-model",
+        title = "TestProvider@test-model",
       }
 
       -- Focus response window
@@ -299,7 +299,7 @@ describe("Chat Layout", function()
 
     it("should push split windows to WinStack", function()
       local chat_win = win_module.SplitChatWin:new {
-        title = "TestServer@test-model",
+        title = "TestProvider@test-model",
       }
 
       -- Both windows should be in the stack
@@ -309,7 +309,7 @@ describe("Chat Layout", function()
 
     it("should pop to original window when split windows are closed", function()
       local chat_win = win_module.SplitChatWin:new {
-        title = "TestServer@test-model",
+        title = "TestProvider@test-model",
       }
 
       -- Change focus to response window

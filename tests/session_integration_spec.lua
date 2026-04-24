@@ -52,7 +52,7 @@ describe("Session Features Integration", function()
   describe("Field Migration", function()
     it("should use title field directly", function()
       -- Create a session with title
-      local session = SessionManager:new_session("test_server", "test_model")
+      local session = SessionManager:new_session("test_provider", "test_model")
       session.title = "my_session_title"
       session:add_message { role = "user", content = "test content" }
       session:save()
@@ -68,7 +68,7 @@ describe("Session Features Integration", function()
   describe("Fork Session", function()
     it("should fork session with specified round count", function()
       -- Create source session with messages (3 rounds = 6 messages)
-      local source = SessionManager:new_session("test_server", "test_model")
+      local source = SessionManager:new_session("test_provider", "test_model")
       source:add_message { role = "user", content = "Question 1" }
       source:add_message { role = "assistant", content = "Answer 1" }
       source:add_message { role = "user", content = "Question 2" }
@@ -94,7 +94,7 @@ describe("Session Features Integration", function()
 
     it("should fork session with all messages", function()
       -- Create source session with messages
-      local source = SessionManager:new_session("test_server", "test_model")
+      local source = SessionManager:new_session("test_provider", "test_model")
       source:add_message { role = "user", content = "Question 1" }
       source:add_message { role = "assistant", content = "Answer 1" }
       source:add_message { role = "user", content = "Question 2" }
@@ -114,7 +114,7 @@ describe("Session Features Integration", function()
     end)
 
     it("should set initial fork title correctly", function()
-      local source = SessionManager:new_session("test_server", "test_model")
+      local source = SessionManager:new_session("test_provider", "test_model")
       source:add_message { role = "user", content = "test" }
       source.title = "Original Title"
       source:save()
@@ -127,7 +127,7 @@ describe("Session Features Integration", function()
     end)
 
     it("should add forked session to session list", function()
-      local source = SessionManager:new_session("test_server", "test_model")
+      local source = SessionManager:new_session("test_provider", "test_model")
       source:add_message { role = "user", content = "test" }
       source:save()
 
@@ -198,7 +198,7 @@ describe("Session Features Integration", function()
 
     it("should fall back to message summary when no generated title", function()
       -- Create session with content but no title_generated_at
-      local session = SessionManager:new_session("test_server", "test_model")
+      local session = SessionManager:new_session("test_provider", "test_model")
       session:add_message { role = "user", content = "This is a test message for summary" }
       session.title = session.id -- Reset title to ID (not generated)
       session.title_generated_at = nil
@@ -219,7 +219,7 @@ describe("Session Features Integration", function()
 
     it("should use generated title when title_generated_at is set", function()
       -- Create session with generated title
-      local session = SessionManager:new_session("test_server", "test_model")
+      local session = SessionManager:new_session("test_provider", "test_model")
       session:add_message { role = "user", content = "some content" }
       session.title = "Generated Title"
       session.title_generated_at = os.time()
@@ -237,7 +237,7 @@ describe("Session Features Integration", function()
 
   describe("Delete Callbacks", function()
     it("should call on_post_delete callback", function()
-      local session = SessionManager:new_session("test_server", "test_model")
+      local session = SessionManager:new_session("test_provider", "test_model")
       session:add_message { role = "user", content = "test" }
       session:save()
 
