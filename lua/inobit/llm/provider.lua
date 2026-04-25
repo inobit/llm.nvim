@@ -76,7 +76,8 @@ DeepLProvider.__index = DeepLProvider
 setmetatable(DeepLProvider, TranslateProvider)
 
 ---@class llm.ProviderManager
----@field providers table<string, llm.Provider>[]
+---@field provider_configs table<string, llm.config.ProviderEntry> provider configurations (not instances)
+---@field resolved_providers table<string, llm.Provider> cache of resolved provider instances
 ---@field default_provider llm.Provider
 ---@field chat_provider llm.Provider
 ---@field translate_provider llm.Provider
@@ -257,24 +258,28 @@ end
 ---@param provider_params? llm.provider.BaseOptions
 ---@return llm.provider.RequestOpts
 function OpenAIProvider:build_request_opts(input, provider_params)
+  -- Extract all BaseOptions fields from provider instance
+  local base_opts = {}
+  for _, field in ipairs(config.BASE_OPTIONS_FIELDS) do
+    if self[field] ~= nil then
+      base_opts[field] = self[field]
+    end
+  end
+
   local body = vim.tbl_deep_extend("force", {}, {
     model = self.model,
     messages = input,
-    stream = self.stream,
-    temperature = self.temperature or 0.6,
-    max_tokens = self.max_tokens or 4096,
-  }, provider_params or {})
-  return Provider.build_request_opts(self, body)
+  }, base_opts, provider_params or {})
+  local opts = Provider.build_request_opts(self, body)
+  -- Chat providers: base_url goes to /v1, append /chat/completions
+  opts.url = self.base_url .. "/chat/completions"
+  return opts
 end
 
 ---@param input llm.session.Message[]
 ---@param provider_params? llm.provider.BaseOptions
 ---@return llm.provider.RequestOpts
 function OpenRouterProvider:build_request_opts(input, provider_params)
-  provider_params = provider_params or {}
-  local reasoning =
-    vim.tbl_deep_extend("force", vim.empty_dict(), self.reasoning or {}, provider_params.reasoning or {})
-  provider_params.reasoning = reasoning
   return OpenAIProvider.build_request_opts(self, input, provider_params)
 end
 
@@ -427,13 +432,49 @@ function Provider:handle_stream_chunk(response, chat)
   end
 end
 
+---Get the default model for a provider based on usage type.
+---@param provider_name string The provider name
+---@param provider_type? ProviderType The type of provider ("chat" or "translate")
+---@return string model_id The default model ID for this provider
+function ProviderManager:_get_provider_default_model(provider_name, provider_type)
+  local provider_config = config.providers[provider_name]
+  if not provider_config then
+    error("Unknown provider: " .. provider_name)
+  end
+
+  -- Priority: specific type default → general default_model
+  local model_id
+  if provider_type == "chat" then
+    model_id = provider_config.default_chat_model or provider_config.default_model
+  elseif provider_type == "translate" then
+    model_id = provider_config.default_translate_model or provider_config.default_model
+  else
+    model_id = provider_config.default_model
+  end
+
+  if not model_id then
+    error("Provider " .. provider_name .. " has no default_model configured")
+  end
+  return model_id
+end
+
+---Set default providers by looking up default_model from each provider's config.
 function ProviderManager:set_default_provider()
   local default_provider = config.options.default_provider
   local default_chat_provider = config.options.default_chat_provider or config.options.default_provider
   local default_translate_provider = config.options.default_translate_provider or config.options.default_provider
-  self.default_provider = self.providers[default_provider]
-  self.chat_provider = self.providers[default_chat_provider]
-  self.translate_provider = self.providers[default_translate_provider]
+
+  -- Resolve default_provider (general, no type)
+  local model_id = self:_get_provider_default_model(default_provider, nil)
+  self.default_provider = self:resolve_provider(default_provider, model_id)
+
+  -- Resolve chat_provider (uses default_chat_model with fallback to default_model)
+  model_id = self:_get_provider_default_model(default_chat_provider, "chat")
+  self.chat_provider = self:resolve_provider(default_chat_provider, model_id)
+
+  -- Resolve translate_provider (uses default_translate_model with fallback to default_model)
+  model_id = self:_get_provider_default_model(default_translate_provider, "translate")
+  self.translate_provider = self:resolve_provider(default_translate_provider, model_id)
 end
 
 ---@param type? ProviderType
@@ -441,11 +482,11 @@ end
 function ProviderManager:provider_selector(type)
   if type == "chat" then
     return vim.tbl_filter(function(v)
-      return not self.providers[v].provider_type or self.providers[v].provider_type == "chat"
-    end, vim.tbl_keys(self.providers))
+      return self.provider_configs[v].provider_type == "chat"
+    end, vim.tbl_keys(self.provider_configs))
   else
     -- all for translate type
-    return vim.tbl_keys(self.providers)
+    return vim.tbl_keys(self.provider_configs)
   end
 end
 
@@ -463,15 +504,24 @@ function ProviderManager:open_provider_selector(type, callback)
     end,
     winOptions = config.options.provider_picker_win,
     enter_handler = function(selected)
+      local provider_config = self.provider_configs[selected]
+      local model_id = provider_config.default_model
+      if not model_id then
+        notify.error("Provider " .. selected .. " has no default_model configured")
+        return
+      end
+      local provider = self:resolve_provider(selected, model_id)
       if type == "chat" then
-        self.chat_provider = self.providers[selected]
-        notify.info(string.format("selected chat provider: %s, does not affect existing sessions!", selected))
+        self.chat_provider = provider
+        notify.info(
+          string.format("selected chat provider: %s@%s, does not affect existing sessions!", selected, model_id)
+        )
         if callback then
           callback(self.chat_provider)
         end
       elseif type == "translate" then
-        self.translate_provider = self.providers[selected]
-        notify.info(string.format("selected translate provider: %s", selected))
+        self.translate_provider = provider
+        notify.info(string.format("selected translate provider: %s@%s", selected, model_id))
         if callback then
           callback(self.translate_provider)
         end
@@ -480,29 +530,91 @@ function ProviderManager:open_provider_selector(type, callback)
   }
 end
 
----@return llm.ProviderManager
-function ProviderManager:init()
-  local providers = vim.tbl_deep_extend("force", {}, config.options.providers) --[=[@as table<string, llm.provider.ProviderOptions>]=]
-  for key, value in pairs(providers) do
-    if not value.provider_type or value.provider_type == "chat" then
-      --TODO: support more llm provider
-      if value.provider == "OpenRouter" then
-        providers[key] = OpenRouterProvider:new(value)
-      else
-        providers[key] = OpenAIProvider:new(value)
-      end
-    elseif value.provider_type == "translate" then
-      -- deepL deepLX
-      if value.provider:lower():find "deepl" then
-        providers[key] = DeepLProvider:new(value)
-      else
-        providers[key] = TranslateProvider:new(value)
-      end
+---Resolve a provider with model-specific overrides applied.
+---Results are cached in resolved_providers table.
+---@param provider_name string The provider name (e.g., "OpenRouter")
+---@param model_id string The model ID to use
+---@return llm.Provider The resolved provider instance
+function ProviderManager:resolve_provider(provider_name, model_id)
+  local cache_key = provider_name .. "@" .. model_id
+
+  -- Return cached instance if available (use rawget to avoid __index recursion)
+  local cached = rawget(self.resolved_providers, cache_key)
+  if cached then
+    return cached
+  end
+
+  -- Get the provider entry from config
+  local provider_entry = config.providers[provider_name]
+  if not provider_entry then
+    error("Unknown provider: " .. provider_name)
+  end
+
+  -- Merge order: type-specific defaults -> provider_entry -> model_overrides
+  -- Select defaults based on provider_type (required field)
+  local defaults = provider_entry.provider_type == "translate" and (config.options.translate_provider_defaults or {})
+    or config.options.chat_provider_defaults
+
+  -- 1. Start with type-specific defaults
+  local resolved_config = vim.tbl_deep_extend("force", {}, defaults)
+
+  -- 2. Merge with provider-specific config
+  resolved_config = vim.tbl_deep_extend("force", resolved_config, provider_entry)
+
+  -- 3. Apply model-specific overrides if they exist
+  local model_overrides = config.normalize_model_overrides(provider_entry.model_overrides)
+  if model_overrides[model_id] then
+    resolved_config = vim.tbl_deep_extend("force", resolved_config, model_overrides[model_id])
+  end
+
+  -- Set the model and provider name
+  resolved_config.model = model_id
+  resolved_config.provider = provider_name
+
+  -- Remove fields not needed for provider instances
+  resolved_config.fetch_models = nil
+  resolved_config.cache_ttl = nil
+  resolved_config.model_overrides = nil
+  resolved_config.default_model = nil
+  resolved_config.default_chat_model = nil
+  resolved_config.default_translate_model = nil
+
+  -- Create the appropriate provider instance based on type (required field)
+  local instance
+  if resolved_config.provider_type == "chat" then
+    if resolved_config.provider == "OpenRouter" then
+      instance = OpenRouterProvider:new(resolved_config)
     else
-      providers[key] = Provider:new(value)
+      instance = OpenAIProvider:new(resolved_config)
+    end
+  elseif resolved_config.provider_type == "translate" then
+    if resolved_config.provider:lower():find "deepl" then
+      instance = DeepLProvider:new(resolved_config)
+    else
+      instance = TranslateProvider:new(resolved_config)
     end
   end
-  self.providers = providers --[=[@as table<string, llm.Provider>[]]=]
+
+  -- Cache and return the instance
+  self.resolved_providers[cache_key] = instance
+  return instance
+end
+
+---@return llm.ProviderManager
+function ProviderManager:init()
+  self.provider_configs = config.providers --[[@as table<string, llm.config.ProviderEntry>]]
+  -- Set up metatable for auto-resolving on access
+  local manager = self
+  self.resolved_providers = setmetatable({}, {
+    __index = function(_, key)
+      -- Parse "Provider@Model" format
+      local provider_name, model_id = key:match "^([^@]+)@(.+)$"
+      if provider_name and model_id then
+        return manager:resolve_provider(provider_name, model_id)
+      end
+      return nil
+    end,
+  })
   self:set_default_provider()
   return self
 end
