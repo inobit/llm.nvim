@@ -10,6 +10,8 @@ AI chat plugin for Neovim, supporting OpenRouter and any OpenAI-compatible API.
 - Multi-round conversation support
 - **Retry functionality**: Press `r` on any user message to retry the question
 - Multiple AI providers support (OpenRouter, OpenAI, Gemini, Claude, etc.)
+- **Dynamic Model Fetching**: Automatically fetch available models from provider APIs with caching
+- **Layered Provider Selection**: Two-panel picker for Provider → Model selection workflow
 - In-buffer translation with auto language detection (Chinese/English)
   - Directly translate and replace in buffer
   - Use `:TS` command to translate and display in floating window
@@ -59,75 +61,110 @@ vim.fn.setenv("OPENROUTER_API_KEY", "your-api-key")
 
 ## Configuration
 
-The plugin works out of the box with sensible defaults. To customize, pass options to the setup function:
+The plugin works out of the box with sensible defaults. To customize, pass options to the setup function.
+
+### Configuration Example
 
 ```lua
-{
+return {
   "inobit/llm.nvim",
   dependencies = { "nvim-lua/plenary.nvim" },
   main = "inobit/llm",
-  -- Optional: custom keymaps
+  cmd = { "LLM", "TS" },
   keys = {
+    -- stylua: ignore start
     { "<leader>at", "<Cmd>LLM Toggle<CR>", desc = "LLM: chat toggle" },
     { "<leader>as", "<Cmd>LLM Sessions<CR>", desc = "LLM: select session" },
     { "<leader>ap", "<Cmd>LLM ChatProviders<CR>", desc = "LLM: select chat provider" },
     { "<leader>aP", "<Cmd>LLM TSProviders<CR>", desc = "LLM: select translate provider" },
-    { "<leader>ts", function() require("inobit.llm.api").translate_in_buffer(true) end, mode = { "n", "v" }, desc = "LLM: translate and replace" },
-    { "<leader>tc", function() require("inobit.llm.api").translate_in_buffer(true, "Z2E_CAMEL") end, mode = { "n", "v" }, desc = "LLM: translate to VAR_CAMEL" },
-    { "<leader>tu", function() require("inobit.llm.api").translate_in_buffer(true, "Z2E_UNDERLINE") end, mode = { "n", "v" }, desc = "LLM: translate to VAR_UNDERLINE" },
-    { "<leader>tp", function() require("inobit.llm.api").translate_in_buffer(false) end, mode = { "n", "v" }, desc = "LLM: translate and print" },
+    {
+      "<leader>ts", function() require("inobit.llm.api").translate_in_buffer(true) end,
+      mode = { "n", "v" }, desc = "LLM: translate and replace",
+    },
+    {
+      "<leader>tc", function() require("inobit.llm.api").translate_in_buffer(true, "Z2E_CAMEL") end,
+      mode = { "n", "v" }, desc = "LLM: translate to VAR_CAMEL",
+    },
+    {
+      "<leader>tu", function() require("inobit.llm.api").translate_in_buffer(true, "Z2E_UNDERLINE") end,
+      mode = { "n", "v" }, desc = "LLM: translate to VAR_UNDERLINE",
+    },
+    {
+      "<leader>tp", function() require("inobit.llm.api").translate_in_buffer(false) end,
+      mode = { "n", "v" }, desc = "LLM: translate and print",
+    },
+    -- stylua: ignore end
   },
   opts = {
-    -- Default provider@model to use (format: "ProviderName@model-name")
-    default_provider = "OpenRouter@openai/gpt-4.5",
-
-    -- Default provider for translation tasks
-    -- default_translate_provider = "OpenRouter@google/gemini-2.5-flash",
+    -- Default provider to use (provider name only)
+    default_provider = "OpenRouter",
+    -- Default provider for translation tasks (optional, defaults to default_provider)
+    -- default_translate_provider = "DeepL",
 
     -- Chat window layout: "float" (default) or "vsplit"
-    chat_layout = "float",
-
-    -- Vsplit window configuration (when chat_layout = "vsplit")
+    chat_layout = "vsplit",
     vsplit_win = {
-      width_percentage = 0.45,  -- Width of the chat panel (0.2 - 0.7)
+      width_percentage = 0.4, -- Width of the chat panel (0.2 - 0.7)
     },
 
-    -- Navigation keymaps for jumping between questions in response window
-    nav = {
-      next_question = "]q",  -- Jump to next question
-      prev_question = "[q",  -- Jump to previous question (supports wrap-around)
+    -- Global defaults for chat-type providers
+    chat_provider_defaults = {
+      stream = true,        -- Enable streaming for responsive chat
+      temperature = 0.7,    -- Balanced creativity (0-2 scale)
+      max_tokens = 4096,    -- Reasonable output limit for most models
     },
+
+    -- Provider configurations
     providers = {
-      -- Example: Add more OpenRouter models
-      {
+      OpenRouter = {
         provider = "OpenRouter",
-        provider_type = "chat",
-        base_url = "https://openrouter.ai/api/v1/chat/completions",
+        provider_type = "chat",  -- Required: "chat" or "translate"
+        base_url = "https://openrouter.ai/api/v1",  -- Goes to /v1, endpoint appended automatically
         api_key_name = "OPENROUTER_API_KEY",
-        stream = true,
-        multi_round = true,
-        max_tokens = 4096,
-        user_role = "user",
-        models = {
-          { model = "anthropic/claude-opus-4", temperature = 0.4 },
-          { model = "anthropic/claude-sonnet-4", temperature = 0.4 },
-          { model = "openai/gpt-4.5", temperature = 0.4 },
-          { model = "openai/gpt-4o", temperature = 0.4 },
-          { model = "google/gemini-2.5-flash", max_tokens = 8192, temperature = 0.6 },
-          { model = "google/gemini-3-pro", max_tokens = 8192, temperature = 0.4 },
+        default_model = "openai/gpt-5.5",
+        fetch_models = true,  -- Enable dynamic model fetching
+        -- Model overrides: can be array (just IDs) or table (with config)
+        model_overrides = {
+          "anthropic/claude-opus-4",
+          "anthropic/claude-sonnet-4",
+          ["openai/gpt-5.5"] = { temperature = 0.4 },
+          ["google/gemini-2.5-flash"] = { max_tokens = 8192 },
         },
       },
 
-      -- Example: Add translation provider (DeepL/DeepLX)
-      {
+      -- Example: Custom OpenAI-compatible provider
+      aliyuncs = {
+        provider = "aliyuncs",
+        provider_type = "chat",
+        base_url = "https://coding.dashscope.aliyuncs.com/v1",
+        api_key_name = "ALIYUN_API_KEY",
+        default_model = "qwen-turbo",
+        max_tokens = 16384,  -- Override for this provider
+        model_overrides = {
+          "qwen-turbo",
+          "qwen-plus",
+        },
+      },
+
+      -- Example: NVIDIA NIM API
+      nvidia = {
+        provider = "nvidia",
+        provider_type = "chat",
+        base_url = "https://integrate.api.nvidia.com/v1",
+        api_key_name = "NVIDIA_API_KEY",
+        fetch_models = true,
+      },
+
+      -- Example: Translation provider (DeepL)
+      DeepL = {
         provider = "DeepL",
-        provider_type = "translate",
-        models = {
-          {
-            model = "DeepLX",
-            base_url = "http://localhost:1188/translate", -- Self-hosted DeepLX
-            api_key_name = "DEEPLX_API_KEY",
-          },
+        provider_type = "translate",  -- Required for non-chat APIs
+        base_url = "http://localhost:1188/translate",  -- Complete endpoint URL
+        api_key_name = "DEEPLX_API_KEY",
+        default_model = "DeepLX",
+        fetch_models = false,  -- Translate providers typically don't have /models endpoint
+        model_overrides = {
+          "DeepLX"
         },
       },
     },
@@ -135,80 +172,84 @@ The plugin works out of the box with sensible defaults. To customize, pass optio
 }
 ```
 
+### Provider Configuration Fields
+
+| Field                     | Required | Description                                                 |
+| ------------------------- | -------- | ----------------------------------------------------------- |
+| `provider`                | Yes      | Provider name (must match table key)                        |
+| `provider_type`           | Yes      | `"chat"` or `"translate"`                                   |
+| `base_url`                | Yes      | API base URL (chat: to `/v1`, translate: complete endpoint) |
+| `api_key_name`            | Yes      | Environment variable name for API key                       |
+| `default_model`           | Yes      | Default model ID                                            |
+| `default_chat_model`      | No       | Default model for chat (falls back to default_model)        |
+| `default_translate_model` | No       | Default model for translate (falls back to default_model)   |
+| `fetch_models`            | No       | Enable dynamic model fetching (default: false)              |
+| `cache_ttl`               | No       | Model cache TTL in hours (default: 24)                      |
+| `model_overrides`         | No       | Model-specific settings (array or table)                    |
+
+### Model Overrides
+
+Two formats supported:
+
+```lua
+-- Array format (just model IDs, no special config)
+model_overrides = {
+  "model-a",
+  "model-b",
+}
+
+-- Table format (model ID as key, with config)
+model_overrides = {
+  ["model-a"] = { temperature = 0.4 },
+  ["model-b"] = { max_tokens = 8192 },
+}
+```
+
+### Provider Types
+
+- **`"chat"`**: OpenAI-compatible APIs. Request uses `/chat/completions` endpoint with OpenAI format.
+- **`"translate"`**: Translation APIs (e.g., DeepL). Request uses custom format.
+
+Note: Chat providers can be used for translation tasks, but translate providers cannot be used for chat.
+
 ## Default Configuration
 
 ```lua
--- lua/inobit/llm/config.lua
+-- Default providers
+OpenRouter = {
+  provider = "OpenRouter",
+  provider_type = "chat",
+  base_url = "https://openrouter.ai/api/v1",
+  api_key_name = "OPENROUTER_API_KEY",
+  default_model = "openai/gpt-5.5",
+  default_translate_model = "google/gemini-2.0-flash-001",
+  fetch_models = true,
+}
 
-local function default_providers()
-  return {
-    {
-      provider = "OpenRouter",
-      provider_type = "chat",
-      base_url = "https://openrouter.ai/api/v1/chat/completions",
-      api_key_name = "OPENROUTER_API_KEY",
-      stream = true,
-      multi_round = true,
-      max_tokens = 4096,
-      user_role = "user",
-      models = {
-        { model = "anthropic/claude-opus-4", temperature = 0.4 },
-        { model = "openai/gpt-4.5", temperature = 0.4 },
-        { model = "google/gemini-3-pro", max_tokens = 8192, temperature = 0.4 },
-      },
-    },
-  }
-end
-
-function M.defaults()
-  return {
-    default_provider = "OpenRouter@openai/gpt-4.5",
-    chat_layout = "float",
-    loading_mark = "**Generating response ...**",
-    user_prompt = "❯",
-    -- question_hi supports:
-    -- - "GroupName" : link to a highlight group (e.g., "MoreMsg", "Question")
-    -- - { fg=..., bg=... }: custom color table
-    question_hi = "Question",
-    retry_key = "r",                      -- Key to retry a question
-    retry_hint_text = " press 'r' to retry", -- Virtual text hint shown on user messages
-    data_dir = vim.fn.stdpath "cache" .. "/inobit/llm",
-    session_dir = "session",
-    chat_win = {
-      width_percentage = 0.7,
-      content_height_percentage = 0.7,
-      input_height_percentage = 0.1,
-      winblend = 3,
-    },
-    session_picker_win = {
-      width_percentage = 0.5,
-      input_height = 1,
-      content_height_percentage = 0.3,
-      winblend = 5,
-    },
-    provider_picker_win = {
-      width_percentage = 0.3,
-      input_height = 1,
-      content_height_percentage = 0.2,
-      winblend = 5,
-    },
-    vsplit_win = {
-      width_percentage = 0.45,
-    },
-  }
-end
+-- Default options
+default_provider = "OpenRouter",
+chat_provider_defaults = {
+  stream = true,
+  temperature = 0.7,
+  max_tokens = 4096,
+},
+chat_layout = "float",
+user_prompt = "❯",
+retry_key = "r",
 ```
 
 ## Usage
 
 ### Commands
 
-| Command              | Description                         |
-| -------------------- | ----------------------------------- |
-| `:LLM Chat`          | Start a new chat session            |
-| `:LLM Sessions`      | Select and manage existing sessions |
-| `:LLM ChatProviders` | Select chat provider (model)        |
-| `:LLM TSProviders`   | Select translation provider         |
+| Command              | Description                                  |
+| -------------------- | -------------------------------------------- |
+| `:LLM Chat`          | Start a new chat session                     |
+| `:LLM Toggle`        | Toggle chat window (open/close)              |
+| `:LLM Sessions`      | Select and manage existing sessions          |
+| `:LLM ChatProviders` | Select provider and model via layered picker |
+| `:LLM TSProviders`   | Select translation provider                  |
+| `:LLM RefreshModels` | Refresh cached models from provider APIs     |
 
 ### Chat Window Keymaps
 
@@ -227,6 +268,16 @@ end
 | --- | -------------- |
 | `r` | Rename session |
 | `d` | Delete session |
+
+### Layered Picker Keymaps
+
+| Key     | Action                                                          |
+| ------- | --------------------------------------------------------------- |
+| `Tab`   | Switch focus between Provider/Model panels                      |
+| `Enter` | Confirm selection (switch to Model on Provider, close on Model) |
+| `j/k`   | Navigate list                                                   |
+| `r`     | Refresh models (bypass cache)                                   |
+| `q`     | Close picker                                                    |
 
 ## Integration
 
@@ -248,15 +299,13 @@ vim.treesitter.language.register("markdown", vim.g.inobit_filetype)
 
 Configure `render-markdown`:
 
-> [!Note] Alone or as a dependency.
-
 ```lua
 return {
   "MeanderingProgrammer/render-markdown.nvim",
   dependencies = {
     "nvim-treesitter/nvim-treesitter",
     "nvim-tree/nvim-web-devicons",
-  }, -- if you prefer nvim-web-devicons
+  },
   opts = {
     render_modes = true,
     code = {
@@ -282,7 +331,7 @@ return {
 lualine_x = {
   -- stylua: ignore start
   {
-    function() return "󰗊 "..  require("inobit.llm.api").is_translating() end,
+    function() return "󰗊 ".. require("inobit.llm.api").is_translating() end,
     cond = function() return package.loaded["inobit.llm"] and require("inobit.llm.api").is_translating() ~= nil end,
     color = function() return { fg = string.format("#%06x", vim.api.nvim_get_hl(0, { name = "Debug", link = false }).fg) } end,
   },
