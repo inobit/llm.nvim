@@ -4,36 +4,60 @@ local Path = require "plenary.path"
 
 ---@alias ProviderType "chat" | "translate"
 
----@class llm.provider.Reasoning
----@field effort? "high" | "medium" | "low"
----@field max_tokens? number
----@field exclude? boolean
-
 ---@class llm.provider.BaseOptions
----@field stream? boolean
----@field multi_round? boolean
----@field user_role? string
----@field temperature? number
----@field max_tokens? number
----@field reasoning? llm.provider.Reasoning
+---@field stream? boolean          -- API: enable streaming response
+---@field temperature? number      -- API: sampling temperature (0-2), lower=focused, higher=random
+---@field max_tokens? number       -- API: max output tokens limit
+---@field multi_round? boolean     -- Internal: enable multi-round conversation
+---@field user_role? string        -- Internal: role name for user messages
+
+---BaseOptions fields that should be passed to API request body
+---Note: multi_round and user_role are internal plugin params, not sent to API
+---@type string[]
+M.BASE_OPTIONS_FIELDS = { "stream", "temperature", "max_tokens" }
 
 ---@class llm.provider.CommonOptions: llm.provider.BaseOptions
 ---@field base_url string
 ---@field api_key_name string
----@field provider_type? ProviderType
+---@field provider_type ProviderType  -- Required: "chat" or "translate"
 
 ---@class llm.provider.ProviderOptions: llm.provider.CommonOptions
 ---@field provider string
 ---@field model string
 
----@class llm.provider.Model: llm.provider.CommonOptions
----@field model string
----@field base_url? string
----@field api_key_name? string
+---@class llm.config.ModelOverride: llm.provider.BaseOptions
+-- Note: model ID is the key in model_overrides table, no need for model field here
 
----@class llm.config.ProviderOptions: llm.provider.CommonOptions
+---@class llm.config.ProviderEntry: llm.provider.CommonOptions
 ---@field provider string
----@field models (string | llm.provider.Model)[]
+---@field provider_type ProviderType  -- Required: "chat" or "translate"
+---@field default_model string  -- Required: General default model (fallback for chat/translate)
+---@field default_chat_model? string  -- Default model for chat (falls back to default_model)
+---@field default_translate_model? string  -- Default model for translate (falls back to default_model)
+---@field model_overrides? table<string, llm.config.ModelOverride> | string[]  -- Can be table with configs or just model ID list
+---@field fetch_models? boolean
+---@field cache_ttl? number  -- Cache duration in hours (default: 24)
+
+---Normalize model_overrides to table format
+---@param model_overrides table<string, llm.config.ModelOverride> | string[]?
+---@return table<string, llm.config.ModelOverride> normalized table with model IDs as keys
+function M.normalize_model_overrides(model_overrides)
+  if not model_overrides then
+    return {}
+  end
+
+  -- Check if it's an array format (string[])
+  if #model_overrides > 0 and type(model_overrides[1]) == "string" then
+    local normalized = {}
+    for _, model_id in ipairs(model_overrides) do
+      normalized[model_id] = {}
+    end
+    return normalized
+  end
+
+  -- Already table format
+  return model_overrides
+end
 
 ---@class llm.WinOptions
 ---@field width_percentage number
@@ -57,10 +81,12 @@ local Path = require "plenary.path"
 ---@field prompt string
 
 ---@class llm.Config
----@field providers table<string, llm.provider.ProviderOptions>
----@field default_provider string
----@field default_chat_provider? string
----@field default_translate_provider? string
+---@field providers table<string, llm.config.ProviderEntry>
+---@field chat_provider_defaults llm.provider.BaseOptions  -- Global defaults for chat-type providers
+---@field translate_provider_defaults? llm.provider.BaseOptions  -- Global defaults for translate-type providers (optional)
+---@field default_provider string  -- Provider name only, model comes from provider's default_model
+---@field default_chat_provider? string  -- Provider name, defaults to default_provider
+---@field default_translate_provider? string  -- Provider name, optional
 ---@field chat_layout "float" | "vsplit"
 ---@field loading_mark string
 ---@field user_prompt string
@@ -77,32 +103,38 @@ local Path = require "plenary.path"
 ---@field retry_hint_text string
 ---@field smart_naming llm.SmartNamingConfig
 
----@return llm.config.ProviderOptions[]
+---@return table<string, llm.config.ProviderEntry>
 local function default_providers()
   return {
-    {
+    OpenRouter = {
       provider = "OpenRouter",
+      base_url = "https://openrouter.ai/api/v1",
       provider_type = "chat",
-      base_url = "https://openrouter.ai/api/v1/chat/completions",
       api_key_name = "OPENROUTER_API_KEY",
-      stream = true,
-      multi_round = true,
-      max_tokens = 4096,
-      user_role = "user",
-      models = {
-        { model = "anthropic/claude-opus-4", temperature = 0.4 },
-        { model = "openai/gpt-4.5", temperature = 0.4 },
-        { model = "google/gemini-3-pro", max_tokens = 8192, temperature = 0.4 },
-        { model = "google/gemini-2.5-flash-lite", max_tokens = 4096, temperature = 0.4 },
-      },
+      -- stream, temperature, etc. come from chat_provider_defaults
+      default_model = "openai/gpt-5.5",
+      default_translate_model = "google/gemini-2.0-flash-001",
+      fetch_models = true, -- Enable dynamic model fetching
     },
   }
 end
 
 function M.defaults()
   return {
-    -- provider@model
-    default_provider = "OpenRouter@openai/gpt-4.5",
+    -- Provider name (model comes from provider's default_model)
+    default_provider = "OpenRouter",
+
+    -- Global defaults for chat-type providers (can be overridden by provider config and model_overrides)
+    -- Only API params here; multi_round and user_role are internal, set elsewhere if needed
+    chat_provider_defaults = {
+      stream = true, -- Enable streaming for responsive chat
+      temperature = 0.7, -- Balanced creativity (0-2 scale)
+      max_tokens = 4096, -- Reasonable output limit for most models
+    },
+
+    -- Global defaults for translate-type providers (optional, no default config)
+    -- translate_provider_defaults = {},
+
     chat_layout = "float",
     loading_mark = "**Generating response ...**",
     user_prompt = "❯",
@@ -127,7 +159,7 @@ function M.defaults()
       width_percentage = 0.3,
       input_height = 1,
       content_height_percentage = 0.2,
-      winblend = 5,
+      winblend = 0,
     },
     vsplit_win = {
       width_percentage = 0.45,
@@ -146,47 +178,24 @@ function M.defaults()
   }
 end
 
----@param providers llm.config.ProviderOptions[]
----@return llm.provider.ProviderOptions[]
-local function flat_providers(providers)
-  return vim
-    .iter(providers)
-    :map(function(item)
-      local models = item.models
-      --WARNING: change object
-      item.models = nil
-      return vim
-        .iter(models)
-        :map(function(model)
-          if type(model) == "string" then
-            model = { model = model }
-          end
-          return vim.tbl_deep_extend("force", {}, item, model)
-        end)
-        :totable()
-    end)
-    :flatten()
-    :totable()
-end
+---@param user_providers table<string, llm.config.ProviderEntry>?
+---@return table<string, llm.config.ProviderEntry>
+local function install_providers(user_providers)
+  local defaults = default_providers()
+  local result = vim.tbl_deep_extend("force", {}, defaults)
 
----@param providers llm.config.ProviderOptions[]
----@return table<string, llm.provider.ProviderOptions>
-local function install_providers(providers)
-  providers = providers or {}
-
-  local default_providers_flat = flat_providers(default_providers())
-  local map = vim.iter(default_providers_flat):fold({}, function(acc, v)
-    acc[v.provider .. "@" .. v.model] = v
-    return acc
-  end)
-  if not vim.tbl_isempty(providers) then
-    providers = flat_providers(providers)
-    vim.iter(providers):each(function(item)
-      map[item.provider .. "@" .. item.model] =
-        vim.tbl_deep_extend("force", {}, map[item.provider .. "@" .. item.model] or {}, item)
-    end)
+  if user_providers and not vim.tbl_isempty(user_providers) then
+    for name, entry in pairs(user_providers) do
+      if result[name] then
+        -- Merge with existing default provider
+        result[name] = vim.tbl_deep_extend("force", {}, result[name], entry)
+      else
+        result[name] = vim.tbl_deep_extend("force", {}, entry)
+      end
+    end
   end
-  return map
+
+  return result
 end
 
 ---@return string
@@ -195,10 +204,12 @@ function M.get_session_dir()
 end
 
 ---@class llm.SetupOptions
----@field providers? llm.config.ProviderOptions[]
----@field default_provider? string
----@field default_chat_provider? string
----@field default_translate_provider? string
+---@field providers? table<string, llm.config.ProviderEntry>
+---@field chat_provider_defaults? llm.provider.BaseOptions  -- Global defaults for chat-type providers
+---@field translate_provider_defaults? llm.provider.BaseOptions  -- Global defaults for translate-type providers
+---@field default_provider? string  -- Provider name only
+---@field default_chat_provider? string  -- Provider name
+---@field default_translate_provider? string  -- Provider name
 ---@field chat_layout? "float" | "vsplit"
 ---@field loading_mark? string
 ---@field user_prompt? string
@@ -240,6 +251,7 @@ function M.setup(options)
   end
 
   M.options = combined --[[@as llm.Config]]
+  M.providers = combined.providers
 end
 
 return M
