@@ -160,7 +160,8 @@ function Chat:new(exists_chat, exists_session)
     this = setmetatable({}, Chat)
     this.session = exists_session
       or SessionManager:new_session(ProviderManager.chat_provider.provider, ProviderManager.chat_provider.model)
-    this.provider = ProviderManager.providers[this.session.provider .. "@" .. this.session.model]
+    -- Auto-resolve via __index metatable (format: "Provider@Model")
+    this.provider = ProviderManager.resolved_providers[this.session.provider .. "@" .. this.session.model]
 
     -- Choose window type based on config
     local chat_layout = config.options.chat_layout
@@ -908,8 +909,8 @@ function Chat:_generate_title_async(first_message)
   -- Use specified light model or fallback to main provider
   local title_provider
   if naming_config.model then
-    local provider_key = naming_config.model
-    title_provider = ProviderManager.providers[provider_key]
+    -- Auto-resolve via __index metatable (format: "Provider@Model")
+    title_provider = ProviderManager.resolved_providers[naming_config.model]
   end
   title_provider = title_provider or self.provider --[[@as llm.OpenAIProvider]]
 
