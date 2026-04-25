@@ -9,21 +9,29 @@ function M.setup(opts)
 
   vim.api.nvim_create_user_command("LLM", function(options)
     local args = options.fargs
-    local command = args[1]
-    if command == "Chat" then
+    local cmd = args[1]
+    if cmd == "Chat" then
       api.new_chat()
-    elseif command == "Toggle" then
+    elseif cmd == "Toggle" then
       api.toggle_chat()
-    elseif command == "Sessions" then
+    elseif cmd == "Sessions" then
       api.open_session_selector()
-    elseif command == "ChatProviders" then
+    elseif cmd == "ChatProviders" then
       api.open_chat_provider_selector()
-    elseif command == "TSProviders" then
+    elseif cmd == "TSProviders" then
       api.open_translate_provider_selector()
+    elseif cmd == "RefreshModels" then
+      api.refresh_models(args[2])
     else
       notify.warn "Invalid LLM command"
     end
-  end, { desc = "llm chat", nargs = "?" })
+  end, {
+    desc = "llm chat",
+    nargs = "*",
+    complete = function()
+      return { "Chat", "Toggle", "Sessions", "ChatProviders", "TSProviders", "RefreshModels" }
+    end,
+  })
 
   -- translate command
   vim.api.nvim_create_user_command("TS", function(options)

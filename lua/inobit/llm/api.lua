@@ -4,6 +4,9 @@ local SessionManager = require "inobit.llm.session"
 local ProviderManager = require "inobit.llm.provider"
 local translate = require "inobit.llm.translate"
 local notify = require "inobit.llm.notify"
+local dual_picker = require "inobit.llm.dual_picker"
+local models = require "inobit.llm.models"
+local config = require "inobit.llm.config"
 
 M.new_chat = function()
   ChatManager:new()
@@ -69,11 +72,25 @@ M.open_session_selector = function()
 end
 
 M.open_chat_provider_selector = function()
-  ProviderManager:open_provider_selector "chat"
+  dual_picker.DualPickerWin:new {
+    title = "Select chat provider@model",
+    provider_type = "chat",
+    on_confirm = function(provider_name, model_id)
+      ProviderManager.chat_provider = ProviderManager:resolve_provider(provider_name, model_id)
+      notify.info("Selected: " .. provider_name .. "@" .. model_id .. " (does not affect existing sessions)")
+    end,
+  }
 end
 
 M.open_translate_provider_selector = function()
-  ProviderManager:open_provider_selector "translate"
+  dual_picker.DualPickerWin:new {
+    title = "Select translate provider@model",
+    provider_type = "translate",
+    on_confirm = function(provider_name, model_id)
+      ProviderManager.translate_provider = ProviderManager:resolve_provider(provider_name, model_id)
+      notify.info("Selected: " .. provider_name .. "@" .. model_id)
+    end,
+  }
 end
 
 ---@param text string
@@ -102,6 +119,64 @@ M.toggle_chat = function()
     pcall(vim.api.nvim_win_close, response_win, true)
   else
     ChatManager:new()
+  end
+end
+
+---Refresh models cache for a specific provider or all providers with fetch_models enabled.
+---@param provider_name? string Optional provider name to refresh. If nil, refreshes all.
+M.refresh_models = function(provider_name)
+  local providers_to_refresh = {}
+
+  if provider_name then
+    -- Refresh specific provider
+    local provider_config = config.providers[provider_name]
+    if provider_config and provider_config.fetch_models then
+      providers_to_refresh = { provider_name }
+    else
+      notify.warn("Provider " .. provider_name .. " does not support dynamic model fetch")
+      return
+    end
+  else
+    -- Refresh all providers with fetch_models enabled
+    for name, p in pairs(config.providers) do
+      if p.fetch_models then
+        table.insert(providers_to_refresh, name)
+      end
+    end
+  end
+
+  if #providers_to_refresh == 0 then
+    notify.info "No providers configured for dynamic model fetch"
+    return
+  end
+
+  notify.info("Refreshing models for " .. #providers_to_refresh .. " provider(s)...")
+
+  local completed = 0
+  for _, name in ipairs(providers_to_refresh) do
+    local provider_config = config.providers[name]
+    models.fetch_models(provider_config, function(model_list, error)
+      vim.schedule(function()
+        if error then
+          notify.error("Failed to fetch models for " .. name .. ": " .. error)
+        elseif model_list and #model_list > 0 then
+          local cache_path = models.get_default_cache_dir() .. "/" .. name:lower() .. ".json"
+          models.save_models_cache(cache_path, {
+            models = model_list,
+            fetched_at = os.time(),
+            provider = name,
+          })
+          notify.info("Refreshed " .. #model_list .. " models for " .. name)
+        else
+          notify.warn("No models returned for " .. name)
+        end
+
+        completed = completed + 1
+        if completed == #providers_to_refresh then
+          notify.info "Model refresh complete"
+        end
+      end)
+    end)
   end
 end
 
