@@ -12,6 +12,7 @@ AI chat plugin for Neovim, supporting OpenRouter and any OpenAI-compatible API.
 - Multiple AI providers support (OpenRouter, OpenAI, Gemini, Claude, etc.)
 - **Dynamic Model Fetching**: Automatically fetch available models from provider APIs with caching
 - **Layered Provider Selection**: Two-panel picker for Provider → Model selection workflow
+  - Auto-detects context: changes current chat's model if foreground, otherwise sets default
 - In-buffer translation with auto language detection (Chinese/English)
   - Directly translate and replace in buffer
   - Use `:TS` command to translate and display in floating window
@@ -242,14 +243,28 @@ retry_key = "r",
 
 ### Commands
 
-| Command              | Description                                  |
-| -------------------- | -------------------------------------------- |
-| `:LLM Chat`          | Start a new chat session                     |
-| `:LLM Toggle`        | Toggle chat window (open/close)              |
-| `:LLM Sessions`      | Select and manage existing sessions          |
-| `:LLM ChatProviders` | Select provider and model via layered picker |
-| `:LLM TSProviders`   | Select translation provider                  |
-| `:LLM RefreshModels` | Refresh cached models from provider APIs     |
+| Command              | Description                                                        |
+| -------------------- | ------------------------------------------------------------------ |
+| `:LLM Chat`          | Start a new chat session                                           |
+| `:LLM Toggle`        | Toggle chat window (open/close)                                    |
+| `:LLM Sessions`      | Select and manage existing sessions                                |
+| `:LLM ChatProviders` | Select provider@model (changes current chat if foreground, else sets default) |
+| `:LLM TSProviders`   | Select translation provider                                        |
+| `:LLM RefreshModels` | Refresh cached models from provider APIs                           |
+
+### Model Selection Behavior
+
+The `:LLM ChatProviders` command automatically adapts based on context:
+
+| Context          | Behavior                                        |
+| ---------------- | ----------------------------------------------- |
+| Foreground chat  | Changes model for the current chat immediately  |
+| No foreground chat | Sets default `chat_provider` for new chats    |
+
+When changing a foreground chat's model:
+- Session's provider/model are updated
+- Window title and header refresh immediately
+- Works even during conversation (not during active request)
 
 ### Chat Window Keymaps
 
