@@ -207,6 +207,49 @@ function Chat:_set_header()
   return #headers
 end
 
+---Change the model for current chat in real-time
+---@param provider_name string
+---@param model_id string
+function Chat:change_model(provider_name, model_id)
+  -- Block if there's an ongoing request
+  if self.requesting then
+    notify.warn("Cannot change model during request", "Wait for the current request to complete")
+    return
+  end
+
+  -- Update session provider/model
+  self.session.provider = provider_name
+  self.session.model = model_id
+
+  -- Update resolved provider instance
+  self.provider = ProviderManager.resolved_providers[provider_name .. "@" .. model_id]
+
+  -- Update window title
+  local new_title = provider_name .. "@" .. model_id
+  if self.win.title then
+    self.win.title = new_title
+  end
+
+  -- Update window display based on layout type
+  local chat_layout = config.options.chat_layout
+  if chat_layout == "vsplit" then
+    -- SplitChatWin: update winbar
+    if vim.api.nvim_win_is_valid(self.win.wins.response.winid) then
+      vim.api.nvim_set_option_value("winbar", new_title, { win = self.win.wins.response.winid })
+    end
+  else
+    -- ChatWin: update window config title
+    if vim.api.nvim_win_is_valid(self.win.wins.response.winid) then
+      vim.api.nvim_win_set_config(self.win.wins.response.winid, { title = new_title, title_pos = "center" })
+    end
+  end
+
+  -- Update header in response buffer
+  self:_set_header()
+
+  notify.info("Model changed", string.format("Switched to %s@%s", provider_name, model_id))
+end
+
 ---@private
 function Chat:_resume_session()
   vim.api.nvim_set_current_win(self.win.wins.response.winid)

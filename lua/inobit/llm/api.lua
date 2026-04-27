@@ -72,12 +72,22 @@ M.open_session_selector = function()
 end
 
 M.open_chat_provider_selector = function()
+  -- Check if there's a foreground chat
+  local current_chat = ChatManager.last_used_chat
+  local has_foreground_chat = current_chat and current_chat:is_foreground()
+
   dual_picker.DualPickerWin:new {
-    title = "Select chat provider@model",
+    title = has_foreground_chat and "Change model for current chat" or "Select chat provider@model",
     provider_type = "chat",
     on_confirm = function(provider_name, model_id)
-      ProviderManager.chat_provider = ProviderManager:resolve_provider(provider_name, model_id)
-      notify.info("Selected: " .. provider_name .. "@" .. model_id .. " (does not affect existing sessions)")
+      if has_foreground_chat then
+        -- Switch model for current foreground chat
+        current_chat:change_model(provider_name, model_id)
+      else
+        -- Set global default provider (for new chats)
+        ProviderManager.chat_provider = ProviderManager:resolve_provider(provider_name, model_id)
+        notify.info("Selected: " .. provider_name .. "@" .. model_id .. " (for new chats)")
+      end
     end,
   }
 end
