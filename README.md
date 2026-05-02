@@ -367,23 +367,9 @@ When changing a foreground chat's model:
 
 ## Integration
 
-### render-markdown
+### render-markdown.nvim
 
-You can use the [render-markdown.nvim](https://github.com/MeanderingProgrammer/render-markdown.nvim) plugin to render the AI's response.
-
-Set the following in your options file:
-
-```lua
-vim.g.inobit_filetype = "inobit"
-```
-
-Register treesitter in file `after/ftplugin/inobit.lua`:
-
-```lua
-vim.treesitter.language.register("markdown", vim.g.inobit_filetype)
-```
-
-Configure `render-markdown`:
+To render markdown in chat windows, add `"inobit"` filetype to [render-markdown.nvim](https://github.com/MeanderingProgrammer/render-markdown.nvim) configuration:
 
 ```lua
 return {
@@ -407,9 +393,11 @@ return {
       comment = { conceal = false },
     },
   },
-  ft = { "markdown", "norg", "rmd", "org", vim.g.inobit_filetype },
+  ft = { "markdown", "norg", "rmd", "org", "inobit" },
 }
 ```
+
+Treesitter registration is handled automatically by the plugin's `after/ftplugin/inobit.lua`.
 
 ### lualine
 
