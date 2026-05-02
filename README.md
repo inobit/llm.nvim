@@ -76,8 +76,7 @@ return {
     -- stylua: ignore start
     { "<leader>at", "<Cmd>LLM Toggle<CR>", desc = "LLM: chat toggle" },
     { "<leader>as", "<Cmd>LLM Sessions<CR>", desc = "LLM: select session" },
-    { "<leader>ap", "<Cmd>LLM ChatProviders<CR>", desc = "LLM: select chat provider" },
-    { "<leader>aP", "<Cmd>LLM TSProviders<CR>", desc = "LLM: select translate provider" },
+    { "<leader>ap", "<Cmd>LLM Providers<CR>", desc = "LLM: select provider" },
     {
       "<leader>ts", function() require("inobit.llm.api").translate_in_buffer(true) end,
       mode = { "n", "v" }, desc = "LLM: translate and replace",
@@ -97,34 +96,41 @@ return {
     -- stylua: ignore end
   },
   opts = {
-    -- Default provider to use (provider name only)
-    default_provider = "OpenRouter",
-    -- Default provider for translation tasks (optional, defaults to default_provider)
-    -- default_translate_provider = "DeepL",
+    -- Default providers for each scenario
+    scenario_defaults = {
+      chat = "OpenRouter",
+      translate = "DeepL",
+    },
 
     -- Chat window layout: "float" (default) or "vsplit"
     chat_layout = "vsplit",
-    vsplit_win = {
+    split_chat = {
       width_percentage = 0.4, -- Width of the chat panel (0.2 - 0.7)
     },
 
-    -- Global defaults for chat-type providers
-    chat_provider_defaults = {
-      stream = true,        -- Enable streaming for responsive chat
-      temperature = 0.7,    -- Balanced creativity (0-2 scale)
-      max_tokens = 4096,    -- Reasonable output limit for most models
+    -- Status toggle keymaps (in chat window)
+    status_keymaps = {
+      toggle_multi_round = "<A-m>",    -- Toggle multi-round conversation mode
+      toggle_show_reasoning = "<A-r>", -- Toggle reasoning/thinking content display
+      cycle_user_role = "<A-l>",       -- Cycle user role (user → assistant → system)
     },
 
     -- Provider configurations
     providers = {
       OpenRouter = {
-        provider = "OpenRouter",
-        provider_type = "chat",  -- Required: "chat" or "translate"
-        base_url = "https://openrouter.ai/api/v1",  -- Goes to /v1, endpoint appended automatically
+        base_url = "https://openrouter.ai/api/v1",
         api_key_name = "OPENROUTER_API_KEY",
+        supports_scenarios = "all",
+        scenario_models = {
+          chat = "openai/gpt-5.5",
+          translate = "google/gemini-2.0-flash-001",
+        },
         default_model = "openai/gpt-5.5",
-        fetch_models = true,  -- Enable dynamic model fetching
-        -- Model overrides: can be array (just IDs) or table (with config)
+        fetch_models = true,
+        params = {
+          temperature = 0.6,
+          max_tokens = 4096,
+        },
         model_overrides = {
           "anthropic/claude-opus-4",
           "anthropic/claude-sonnet-4",
@@ -134,13 +140,15 @@ return {
       },
 
       -- Example: Custom OpenAI-compatible provider
-      aliyuncs = {
-        provider = "aliyuncs",
-        provider_type = "chat",
-        base_url = "https://coding.dashscope.aliyuncs.com/v1",
+      Aliyun = {
+        base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1",
         api_key_name = "ALIYUN_API_KEY",
-        default_model = "qwen-turbo",
-        max_tokens = 16384,  -- Override for this provider
+        supports_scenarios = "all",
+        default_model = "kimi-k2.5",
+        params = {
+          temperature = 0.6,
+          max_tokens = 16384,
+        },
         model_overrides = {
           "qwen-turbo",
           "qwen-plus",
@@ -148,24 +156,27 @@ return {
       },
 
       -- Example: NVIDIA NIM API
-      nvidia = {
-        provider = "nvidia",
-        provider_type = "chat",
+      Nvidia = {
         base_url = "https://integrate.api.nvidia.com/v1",
         api_key_name = "NVIDIA_API_KEY",
+        supports_scenarios = "all",
+        default_model = "deepseek-ai/deepseek-v4-pro",
         fetch_models = true,
+        params = {
+          temperature = 0.6,
+          max_tokens = 16384,
+        },
       },
 
       -- Example: Translation provider (DeepL)
       DeepL = {
-        provider = "DeepL",
-        provider_type = "translate",  -- Required for non-chat APIs
-        base_url = "http://localhost:1188/translate",  -- Complete endpoint URL
-        api_key_name = "DEEPLX_API_KEY",
-        default_model = "DeepLX",
-        fetch_models = false,  -- Translate providers typically don't have /models endpoint
-        model_overrides = {
-          "DeepLX"
+        base_url = "https://api-free.deepl.com/v2",
+        api_key_name = "DEEPL_API_KEY",
+        supports_scenarios = { "translate" },
+        default_model = "deepl",
+        fetch_models = false,
+        params = {
+          formality = "default",
         },
       },
     },
@@ -175,18 +186,47 @@ return {
 
 ### Provider Configuration Fields
 
-| Field                     | Required | Description                                                 |
-| ------------------------- | -------- | ----------------------------------------------------------- |
-| `provider`                | Yes      | Provider name (must match table key)                        |
-| `provider_type`           | Yes      | `"chat"` or `"translate"`                                   |
-| `base_url`                | Yes      | API base URL (chat: to `/v1`, translate: complete endpoint) |
-| `api_key_name`            | Yes      | Environment variable name for API key                       |
-| `default_model`           | Yes      | Default model ID                                            |
-| `default_chat_model`      | No       | Default model for chat (falls back to default_model)        |
-| `default_translate_model` | No       | Default model for translate (falls back to default_model)   |
-| `fetch_models`            | No       | Enable dynamic model fetching (default: false)              |
-| `cache_ttl`               | No       | Model cache TTL in hours (default: 24)                      |
-| `model_overrides`         | No       | Model-specific settings (array or table)                    |
+| Field               | Required | Description                                                  |
+| ------------------- | -------- | ------------------------------------------------------------ |
+| `base_url`          | Yes      | API base URL (to `/v1` level, endpoint appended automatically) |
+| `api_key_name`      | No       | Environment variable name for API key (can be `false` to disable) |
+| `supports_scenarios`| No       | `"all"` or list like `{ "chat", "translate" }` (default: `"all"`) |
+| `scenario_models`   | No       | Scenario-specific models: `{ chat = "model-a", translate = "model-b" }` |
+| `default_model`     | Yes      | Default model ID                                             |
+| `fetch_models`      | No       | Enable dynamic model fetching (default: false)               |
+| `cache_ttl`         | No       | Model cache TTL in hours (default: 24)                       |
+| `params`            | No       | API parameters (temperature, max_tokens, stream, etc.)       |
+| `model_overrides`   | No       | Model-specific settings (array or table)                     |
+
+### Highlight Configuration
+
+Customize the appearance of different content types in chat windows:
+
+```lua
+opts = {
+  -- Question (user input) highlight
+  question_hi = "Question",  -- highlight group name
+
+  -- Reasoning/thinking content highlight and styling
+  reasoning_hi = "Comment",     -- highlight group for reasoning content
+  reasoning_icon = "💭",        -- icon for reasoning block header
+
+  -- Response highlight
+  response_hi = "Normal",       -- highlight group for AI response
+
+  -- Error/Warning highlights
+  error_hi = "ErrorMsg",        -- error message highlight
+  warning_hi = "WarningMsg",    -- warning/cancel message highlight
+}
+```
+
+You can use any highlight group name, or create custom highlights:
+
+```lua
+opts = {
+  reasoning_hi = { fg = "#6a9fb5", italic = true },
+}
+```
 
 ### Model Overrides
 
@@ -206,37 +246,65 @@ model_overrides = {
 }
 ```
 
-### Provider Types
+### Provider Scenarios
 
-- **`"chat"`**: OpenAI-compatible APIs. Request uses `/chat/completions` endpoint with OpenAI format.
-- **`"translate"`**: Translation APIs (e.g., DeepL). Request uses custom format.
+- **`supports_scenarios = "all"`**: Provider supports both chat and translation scenarios.
+- **`supports_scenarios = { "chat" }`**: Provider only supports chat (e.g., specialized chat APIs).
+- **`supports_scenarios = { "translate" }`**: Provider only supports translation (e.g., DeepL).
 
-Note: Chat providers can be used for translation tasks, but translate providers cannot be used for chat.
+Use `scenario_models` to specify different default models for each scenario:
+```lua
+scenario_models = {
+  chat = "openai/gpt-5.5",
+  translate = "google/gemini-2.0-flash-001",
+}
+```
 
 ## Default Configuration
 
 ```lua
--- Default providers
+-- Default providers for each scenario
+scenario_defaults = {
+  chat = "OpenRouter",
+  translate = "OpenRouter",
+}
+
+-- Default provider configurations
 OpenRouter = {
-  provider = "OpenRouter",
-  provider_type = "chat",
   base_url = "https://openrouter.ai/api/v1",
   api_key_name = "OPENROUTER_API_KEY",
+  supports_scenarios = "all",
+  scenario_models = {
+    chat = "openai/gpt-5.5",
+    translate = "google/gemini-2.0-flash-001",
+  },
   default_model = "openai/gpt-5.5",
-  default_translate_model = "google/gemini-2.0-flash-001",
   fetch_models = true,
+  params = {
+    temperature = 0.6,
+    max_tokens = 4096,
+  },
 }
 
 -- Default options
-default_provider = "OpenRouter",
-chat_provider_defaults = {
-  stream = true,
-  temperature = 0.7,
-  max_tokens = 4096,
-},
 chat_layout = "float",
 user_prompt = "❯",
 retry_key = "r",
+
+-- Highlight configuration
+question_hi = "Question",
+reasoning_hi = "Comment",
+reasoning_icon = "💭",
+response_hi = "Normal",
+error_hi = "ErrorMsg",
+warning_hi = "WarningMsg",
+
+-- Status toggle keymaps
+status_keymaps = {
+  toggle_multi_round = "<A-m>",
+  toggle_show_reasoning = "<A-r>",
+  cycle_user_role = "<A-l>",
+},
 ```
 
 ## Usage
@@ -248,36 +316,39 @@ retry_key = "r",
 | `:LLM Chat`          | Start a new chat session                                           |
 | `:LLM Toggle`        | Toggle chat window (open/close)                                    |
 | `:LLM Sessions`      | Select and manage existing sessions                                |
-| `:LLM ChatProviders` | Select provider@model (changes current chat if foreground, else sets default) |
-| `:LLM TSProviders`   | Select translation provider                                        |
+| `:LLM Providers`     | Select provider@model for a scenario (changes current chat if foreground) |
 | `:LLM RefreshModels` | Refresh cached models from provider APIs                           |
 
 ### Model Selection Behavior
 
-The `:LLM ChatProviders` command automatically adapts based on context:
+The `:LLM Providers` command workflow:
+1. First, select a **scenario** (chat or translate)
+2. Then select **provider** and **model** in the layered picker
 
-| Context          | Behavior                                        |
-| ---------------- | ----------------------------------------------- |
-| Foreground chat  | Changes model for the current chat immediately  |
-| No foreground chat | Sets default `chat_provider` for new chats    |
+For **chat scenario**, if there's a foreground chat, the model change applies immediately to that chat. Otherwise, it sets the default for new chats.
+
+For **translate scenario**, the selection sets the default provider for translation tasks.
 
 When changing a foreground chat's model:
 - Session's provider/model are updated
-- Window title and header refresh immediately
+- Window header refreshes immediately
 - Works even during conversation (not during active request)
 
 ### Chat Window Keymaps
 
-| Key     | Action                                                         |
-| ------- | -------------------------------------------------------------- |
-| `<C-C>` | End current session                                            |
-| `<C-S>` | Save current session                                           |
-| `<C-N>` | Create new session                                             |
-| `[q`    | Go to previous question (wrap)                                 |
-| `]q`    | Go to next question (wrap)                                     |
-| `r`     | Retry the question under cursor (when virtual text hint shows) |
+| Key     | Action                                                          |
+| ------- | --------------------------------------------------------------- |
+| `<C-C>` | End current session                                             |
+| `<C-S>` | Save current session                                            |
+| `<C-N>` | Create new session                                              |
+| `[q`    | Go to previous question (wrap)                                  |
+| `]q`    | Go to next question (wrap)                                      |
+| `r`     | Retry the question under cursor (when virtual text hint shows)  |
+| `<A-m>` | Toggle multi-round conversation mode                            |
+| `<A-r>` | Toggle reasoning/thinking content display                       |
+| `<A-l>` | Cycle user role (user → assistant → system → user)              |
 
-### Session Picker Keymaps
+**Note**: The `<A-m>`, `<A-r>`, and `<A-l>` keymaps can be customized via the `status_keymaps` configuration option.
 
 | Key | Action         |
 | --- | -------------- |
