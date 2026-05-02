@@ -1,7 +1,20 @@
 local config = require "inobit.llm.config"
 config.setup { session_dir = "tests" }
 local SessionManager = require "inobit.llm.session"
+local TurnStatus = require("inobit.llm.turn").TurnStatus
 local Path = require "plenary.path"
+
+---Helper to add a complete turn to session
+---@param session llm.Session
+---@param user_content string
+---@param assistant_content string
+local function add_turn(session, user_content, assistant_content)
+  local turn = session:new_turn({ role = "user", content = user_content })
+  turn:update({
+    assistant = { role = "assistant", content = assistant_content },
+    status = TurnStatus.COMPLETE,
+  })
+end
 
 describe("SessionManager", function()
   local test_dir = Path:new(config.get_session_dir())
@@ -36,12 +49,12 @@ describe("SessionManager", function()
 
   it("it should be able to save and load sessions", function()
     local session = SessionManager:new_session("test_provider", "test_model")
-    session:add_message { role = "user", content = "test" }
+    add_turn(session, "test question", "test answer")
     session:save()
 
     local loaded = SessionManager:load(session.id)
     assert.equals(session.id, loaded.id)
-    assert.equals(1, #loaded.content)
+    assert.equals(1, #loaded.turns)
   end)
 
   it("it should be able to generate a session selection list.", function()
@@ -62,7 +75,7 @@ describe("SessionManager", function()
 
   it("it should be able to rename session", function()
     local session = SessionManager:new_session("test_provider", "test_model")
-    session.content = { { "test content" } }
+    add_turn(session, "test question", "test answer")
     session:rename "new_title"
     assert.equals("new_title", SessionManager.session_list[session.id].title)
   end)

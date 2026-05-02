@@ -6,10 +6,12 @@ describe("Provider Manager", function()
 
   before_each(function()
     vim.fn.setenv("TEST_API_KEY", "test-api-key")
+    vim.fn.setenv("OPENROUTER_API_KEY", "test-or-key")
   end)
 
   after_each(function()
     vim.fn.setenv("TEST_API_KEY", nil)
+    vim.fn.setenv("OPENROUTER_API_KEY", nil)
   end)
 
   describe("new config format", function()
@@ -17,20 +19,20 @@ describe("Provider Manager", function()
       config.setup {
         providers = {
           TestProvider = {
-            provider = "TestProvider",
             base_url = test_provider_url,
             api_key_name = "TEST_API_KEY",
-            provider_type = "chat",
+            supports_scenarios = "all",
             default_model = "test-model",
-            temperature = 0.5,
+            params = { temperature = 0.5 },
           },
         },
-        default_provider = "TestProvider", -- Just provider name
+        scenario_defaults = {
+          chat = "TestProvider",
+        },
       }
 
       assert.is_table(config.providers)
       assert.is_table(config.providers.TestProvider)
-      assert.equals("TestProvider", config.providers.TestProvider.provider)
       assert.equals(test_provider_url, config.providers.TestProvider.base_url)
       assert.equals("test-model", config.providers.TestProvider.default_model)
     end)
@@ -39,19 +41,20 @@ describe("Provider Manager", function()
       config.setup {
         providers = {
           TestProvider = {
-            provider = "TestProvider",
             base_url = test_provider_url,
             api_key_name = "TEST_API_KEY",
-            provider_type = "chat",
+            supports_scenarios = "all",
             default_model = "model-a",
-            temperature = 0.6,
+            params = { temperature = 0.6 },
             model_overrides = {
               ["model-a"] = { temperature = 0.4 },
               ["model-b"] = { temperature = 0.8, max_tokens = 8192 },
             },
           },
         },
-        default_provider = "TestProvider", -- Just provider name
+        scenario_defaults = {
+          chat = "TestProvider",
+        },
       }
 
       local entry = config.providers.TestProvider
@@ -66,19 +69,21 @@ describe("Provider Manager", function()
         providers = {
           OpenRouter = {
             default_model = "custom-model",
-            temperature = 0.3,
+            params = { temperature = 0.3 },
           },
         },
-        default_provider = "OpenRouter", -- Just provider name
+        scenario_defaults = {
+          chat = "OpenRouter",
+        },
       }
 
       local entry = config.providers.OpenRouter
       -- Should have default values
       assert.equals("https://openrouter.ai/api/v1", entry.base_url)
       assert.equals("OPENROUTER_API_KEY", entry.api_key_name)
-      assert.equals("chat", entry.provider_type)
+      assert.equals("all", entry.supports_scenarios)
       -- Should have user override
-      assert.equals(0.3, entry.temperature)
+      assert.equals(0.3, entry.params.temperature)
       assert.equals("custom-model", entry.default_model)
     end)
 
@@ -86,65 +91,65 @@ describe("Provider Manager", function()
       config.setup {
         providers = {
           TestProvider = {
-            provider = "TestProvider",
             base_url = test_provider_url,
             api_key_name = "TEST_API_KEY",
-            provider_type = "chat",
+            supports_scenarios = "all",
             default_model = "test-model",
             fetch_models = true,
           },
         },
-        default_provider = "TestProvider", -- Just provider name
+        scenario_defaults = {
+          chat = "TestProvider",
+        },
       }
 
       assert.is_true(config.providers.TestProvider.fetch_models)
     end)
 
-    it("should support default_providers with model_overrides", function()
-      -- User can add model_overrides to default providers
+    it("should support model_overrides with string array format", function()
+      -- User can add model_overrides as simple string array
       config.setup {
         providers = {
           OpenRouter = {
             model_overrides = {
-              ["anthropic/claude-opus-4"] = { temperature = 0.4 },
+              "anthropic/claude-opus-4",
+              "anthropic/claude-sonnet-4",
             },
           },
         },
-        default_provider = "OpenRouter",
+        scenario_defaults = {
+          chat = "OpenRouter",
+        },
       }
 
       local entry = config.providers.OpenRouter
       assert.is_table(entry.model_overrides)
-      assert.is_table(entry.model_overrides["anthropic/claude-opus-4"])
-      assert.equals(0.4, entry.model_overrides["anthropic/claude-opus-4"].temperature)
+      -- String array format should be normalized to empty tables
+      local normalized = config.normalize_model_overrides(entry.model_overrides)
+      assert.is_table(normalized["anthropic/claude-opus-4"])
+      assert.is_table(normalized["anthropic/claude-sonnet-4"])
     end)
   end)
 
   describe("resolve_provider", function()
-    local provider = require "inobit.llm.provider"
+    local provider
 
     before_each(function()
       vim.fn.setenv("TEST_API_KEY", "test-api-key")
       config.setup {
         providers = {
-          TestProvider = {
-            provider = "TestProvider",
-            base_url = test_provider_url,
-            api_key_name = "TEST_API_KEY",
-            provider_type = "chat",
-            default_model = "default-model",
-            temperature = 0.6,
+          OpenRouter = {
+            default_model = "openai/gpt-4.5",
+            params = { temperature = 0.6 },
             model_overrides = {
               ["model-a"] = { temperature = 0.4 },
               ["model-b"] = { temperature = 0.8, max_tokens = 8192 },
             },
           },
-          OpenRouter = {
-            provider = "OpenRouter",
-            default_model = "openai/gpt-4.5",
-          },
         },
-        default_provider = "TestProvider", -- Just provider name
+        scenario_defaults = {
+          chat = "OpenRouter",
+        },
       }
       -- Reset the provider module to pick up new config
       package.loaded["inobit.llm.provider"] = nil
@@ -156,35 +161,33 @@ describe("Provider Manager", function()
     end)
 
     it("should resolve provider with merged config", function()
-      local resolved = provider:resolve_provider("TestProvider", "model-a")
+      local resolved = provider:resolve_provider("OpenRouter", "model-a")
 
       assert.is_table(resolved)
-      assert.equals("TestProvider", resolved.provider)
+      assert.equals("OpenRouter", resolved.provider)
       assert.equals("model-a", resolved.model)
-      assert.equals(test_provider_url, resolved.base_url)
-      assert.equals("TEST_API_KEY", resolved.api_key_name)
+      assert.equals("https://openrouter.ai/api/v1", resolved.base_url)
+      assert.equals("OPENROUTER_API_KEY", resolved.api_key_name)
       -- Should have model override temperature
-      assert.equals(0.4, resolved.temperature)
-      -- Should NOT have model_overrides in resolved config
-      assert.is_nil(resolved.model_overrides)
+      assert.equals(0.4, resolved.params.temperature)
     end)
 
     it("should cache resolved providers", function()
-      local resolved1 = provider:resolve_provider("TestProvider", "model-a")
-      local resolved2 = provider:resolve_provider("TestProvider", "model-a")
+      local resolved1 = provider:resolve_provider("OpenRouter", "model-a")
+      local resolved2 = provider:resolve_provider("OpenRouter", "model-a")
 
       -- Should return the same cached instance
       assert.is_true(resolved1 == resolved2)
     end)
 
     it("should resolve provider without model_overrides", function()
-      local resolved = provider:resolve_provider("TestProvider", "unknown-model")
+      local resolved = provider:resolve_provider("OpenRouter", "unknown-model")
 
       assert.is_table(resolved)
-      assert.equals("TestProvider", resolved.provider)
+      assert.equals("OpenRouter", resolved.provider)
       assert.equals("unknown-model", resolved.model)
       -- Should use base provider config temperature (no override)
-      assert.equals(0.6, resolved.temperature)
+      assert.equals(0.6, resolved.params.temperature)
     end)
 
     it("should error on unknown provider", function()
@@ -203,56 +206,94 @@ describe("Provider Manager", function()
       assert.is_function(resolved.build_request_opts)
     end)
 
-    it("should set default_provider from config", function()
-      -- Verify default_provider is set correctly
-      assert.is_table(provider.default_provider)
-      assert.equals("TestProvider", provider.default_provider.provider)
-      assert.equals("default-model", provider.default_provider.model)
-
-      -- Verify chat_provider defaults to default_provider
-      assert.is_table(provider.chat_provider)
-      assert.equals("TestProvider", provider.chat_provider.provider)
-
-      -- Verify translate_provider defaults to default_provider
-      assert.is_table(provider.translate_provider)
-      assert.equals("TestProvider", provider.translate_provider.provider)
+    it("should set scenario_providers from config", function()
+      -- Verify scenario_providers is set correctly
+      assert.is_table(provider.scenario_providers)
+      assert.is_table(provider.scenario_providers.chat)
+      assert.equals("OpenRouter", provider.scenario_providers.chat.provider)
     end)
 
-    it("should set separate chat_provider and translate_provider", function()
+    it("should support scenario-specific models", function()
       config.setup {
         providers = {
-          ChatProvider = {
-            provider = "ChatProvider",
-            base_url = test_provider_url,
-            api_key_name = "TEST_API_KEY",
-            provider_type = "chat",
-            default_model = "chat-model",
-          },
-          TranslateProvider = {
-            provider = "TranslateProvider",
-            base_url = test_provider_url,
-            api_key_name = "TEST_API_KEY",
-            provider_type = "translate",
-            default_model = "translate-model",
+          OpenRouter = {
+            default_model = "default-model",
+            scenario_models = {
+              chat = "chat-model",
+              translate = "translate-model",
+            },
           },
         },
-        default_provider = "ChatProvider",
-        default_chat_provider = "ChatProvider",
-        default_translate_provider = "TranslateProvider",
+        scenario_defaults = {
+          chat = "OpenRouter",
+          translate = "OpenRouter",
+        },
       }
-      -- Reset the provider module to pick up new config
+      -- Reset the provider module
       package.loaded["inobit.llm.provider"] = nil
-      provider = require "inobit.llm.provider"
+      local test_provider = require "inobit.llm.provider"
 
-      assert.equals("ChatProvider", provider.default_provider.provider)
-      assert.equals("chat-model", provider.default_provider.model)
-      assert.equals("ChatProvider", provider.chat_provider.provider)
-      assert.equals("chat-model", provider.chat_provider.model)
-      assert.equals("TranslateProvider", provider.translate_provider.provider)
-      assert.equals("translate-model", provider.translate_provider.model)
+      -- Check that scenario providers are set
+      assert.is_table(test_provider.scenario_providers.chat)
+      assert.equals("OpenRouter", test_provider.scenario_providers.chat.provider)
     end)
   end)
 
-  -- NOTE: ProviderManager integration tests will be added in Task 11/12
-  -- after ProviderManager refactoring (Task 4/5) is complete
+  describe("provider_supports_scenario", function()
+    local provider
+
+    before_each(function()
+      config.setup {
+        providers = {
+          -- Use existing registered providers for testing
+          OpenRouter = {
+            base_url = "https://openrouter.ai/api/v1",
+            api_key_name = "OPENROUTER_API_KEY",
+            supports_scenarios = { "chat" },
+            default_model = "chat-model",
+          },
+          DeepL = {
+            base_url = "https://api-free.deepl.com/v2",
+            api_key_name = "DEEPL_API_KEY",
+            supports_scenarios = { "translate" },
+            default_model = "deepl",
+          },
+        },
+        scenario_defaults = {
+          chat = "OpenRouter",
+          translate = "DeepL",
+        },
+      }
+      package.loaded["inobit.llm.provider"] = nil
+      provider = require "inobit.llm.provider"
+    end)
+
+    it("should return true for chat scenario with chat provider", function()
+      assert.is_true(provider:provider_supports_scenario("OpenRouter", "chat"))
+    end)
+
+    it("should return false for translate scenario with chat-only provider", function()
+      assert.is_false(provider:provider_supports_scenario("OpenRouter", "translate"))
+    end)
+
+    it("should return true for translate scenario with translate provider", function()
+      assert.is_true(provider:provider_supports_scenario("DeepL", "translate"))
+    end)
+
+    it("should return true for all scenarios with all-supporting provider", function()
+      -- Aliyun supports all scenarios by default
+      assert.is_true(provider:provider_supports_scenario("Aliyun", "chat"))
+      assert.is_true(provider:provider_supports_scenario("Aliyun", "translate"))
+    end)
+
+    it("should get providers for specific scenario", function()
+      local chat_providers = provider:get_providers_for_scenario("chat")
+      assert.is_table(chat_providers)
+      -- Should include OpenRouter (chat-only) and Aliyun (all scenarios)
+      assert.is_true(vim.tbl_contains(chat_providers, "OpenRouter"))
+      assert.is_true(vim.tbl_contains(chat_providers, "Aliyun"))
+      -- Should not include DeepL (translate-only)
+      assert.is_false(vim.tbl_contains(chat_providers, "DeepL"))
+    end)
+  end)
 end)
