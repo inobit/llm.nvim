@@ -1,9 +1,10 @@
 local M = {}
 
 local ProviderManager = require "inobit.llm.provider"
+local config = require "inobit.llm.config"
 local util = require "inobit.llm.util"
 local notify = require "inobit.llm.notify"
-local win = require "inobit.llm.win"
+local win = require "inobit.llm.ui"
 local Spinner = require("inobit.llm.spinner").TextSpinner
 
 ---@class llm.translate.PromptOptions
@@ -47,7 +48,7 @@ local function build_translation_prompt(params)
 
   return {
     { role = "system", content = system_prompt },
-    { role = ProviderManager.translate_provider.user_role or "user", content = content },
+    { role = "user", content = content },
   }
 end
 
@@ -220,11 +221,24 @@ function M.translate(translate_type, specification, from, text, callback, on_err
     return
   end
 
-  local provider = ProviderManager.translate_provider --[[@as llm.OpenAIProvider | llm.DeepLProvider]]
+  local provider = ProviderManager.scenario_providers[config.Scenario.TRANSLATE]
   local messages = {}
   local opts = {}
+  local is_deepl = provider.provider:lower() == "deepl"
 
-  if provider:is_chat_provider() then
+  if is_deepl then
+    -- DeepL provider: use text-based API (match old implementation format)
+    messages = {
+      text = text,
+    }
+    if vim.startswith(translate_type, "E2Z") then
+      messages.target_lang = "ZH"
+    elseif vim.startswith(translate_type, "Z2E") then
+      messages.target_lang = "EN"
+    end
+    opts = provider:build_request_opts(messages)
+  else
+    -- OpenAI-compatible provider: use message-based API
     if translate_type == "E2Z" then
       messages = translate_en_to_zh(text, specification)
     elseif translate_type == "Z2E" then
@@ -234,40 +248,42 @@ function M.translate(translate_type, specification, from, text, callback, on_err
     elseif translate_type == "Z2E_UNDERLINE" then
       messages = translate_zh_to_en_var_underline(text)
     end
-    opts = provider:build_request_opts(messages, { stream = false, temperature = 1.3 })
-  elseif provider:is_translate_provider() then
-    messages.text = provider.clean_source_text and provider:clean_source_text(text) or text
-    if vim.startswith(translate_type, "E2Z") then
-      messages.target_lang = "ZH"
-    elseif vim.startswith(translate_type, "Z2E") then
-      messages.target_lang = "EN"
-    end
-    opts = provider--[[@as llm.DeepLProvider]]:build_request_opts(messages)
-  else
-    notify.error(string.format("Provider %s not supported", provider))
+    -- OpenAI build_request_body expects messages array and params
+    local body = provider:build_request_body(messages, { stream = false, temperature = 1.3 })
+    opts = provider:build_request_opts(body)
+  end
+
+  -- If opts is nil, API key was required but not provided
+  if not opts then
     return
   end
 
   local exit_callback = function(res)
-    if res.status == 200 then
-      local result = provider:parse_translation_result(res)
-      if result then
-        if type(result) == "table" then
-          if specification == "simple" or result.alternatives == nil or #result.alternatives == 0 then
-            result = result.data
-          else
-            local style = { result.data, "", "alternatives: " }
-            result.alternatives = vim.tbl_map(function(str)
-              return "- " .. str
-            end, result.alternatives)
-            vim.list_extend(style, result.alternatives)
-            result = table.concat(style, "\n")
-          end
+    if res.status ~= 200 then
+      notify.error(string.format("Translate HTTP error: %s", res.status))
+      spinner:stop()
+      return
+    end
+
+    local ok, parsed = provider:parse_response(res)
+    if not ok then
+      notify.error(string.format("Translate error: %s", parsed.error or "unknown"))
+      spinner:stop()
+      return
+    end
+    if parsed.content then
+      local result = parsed.content
+      -- Handle alternatives for complex specification (DeepL custom format)
+      if is_deepl and parsed.alternatives and #parsed.alternatives > 0 and specification == "complex" then
+        local lines = { result, "", "alternatives: " }
+        for _, alt in ipairs(parsed.alternatives) do
+          table.insert(lines, "- " .. alt)
         end
-        callback(convert_to_variable(result --[[@as string]], translate_type), from)
+        result = table.concat(lines, "\n")
       end
+      callback(convert_to_variable(result, translate_type), from)
     else
-      notify.error(string.format("Translate %s error: %s", res.status, res.body))
+      notify.error "Translate error: no content in response"
     end
     spinner:stop()
   end
@@ -278,7 +294,7 @@ function M.translate(translate_type, specification, from, text, callback, on_err
       on_error(err)
     end
   end
-  if ProviderManager.translate_provider:request(opts) ~= nil then
+  if provider:request(opts) ~= nil then
     spinner:start()
   end
 end
@@ -343,7 +359,7 @@ local function hover_result(content, from)
   }, independent_opts)
 
   local floating = win.PaddingFloatingWin:new(opts, padding)
-  vim.bo[floating.bufnr].filetype = vim.g.inobit_filetype
+  vim.bo[floating.bufnr].filetype = config.FILETYPE
 
   vim.api.nvim_create_autocmd("cursormoved", {
     group = vim.api.nvim_create_augroup("llm_ts_clean_float", { clear = true }),

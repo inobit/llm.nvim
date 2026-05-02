@@ -2,13 +2,54 @@ local util = require "inobit.llm.util"
 local config = require "inobit.llm.config"
 local io = require "inobit.llm.io"
 local Path = require "plenary.path"
-local win = require "inobit.llm.win"
+local win = require "inobit.llm.ui"
 local notify = require "inobit.llm.notify"
+
+-- Import TurnStatus enum (no circular dependency, turn.lua only depends on block.lua)
+local TurnStatus = require("inobit.llm.turn").TurnStatus
 
 ---@class llm.session.Message
 ---@field role string
 ---@field reasoning_content? string
 ---@field content? string
+
+---@class llm.session.Turn
+---@field id integer                   -- Self-incrementing index (from 1)
+---@field user llm.session.Message     -- User questions
+---@field assistant? llm.session.Message   -- AI answer (on success)
+---@field reasoning? llm.session.Message   -- Content of reasoning (optional)
+---@field status llm.TurnStatus
+---@field message? string              -- Turn message (reason for error or cancellation)
+---@field finish_reason? string        -- recording only
+---@field create_time integer
+---@field update_time integer
+local SessionTurn = {}
+SessionTurn.__index = SessionTurn
+
+---Create new SessionTurn
+---@param id integer
+---@param user_message llm.session.Message
+---@return llm.session.Turn
+function SessionTurn:new(id, user_message)
+  return setmetatable({
+    id = id,
+    user = user_message,
+    status = TurnStatus.PENDING,
+    create_time = os.time(),
+    update_time = os.time(),
+  }, self)
+end
+
+---Update SessionTurn data from Turn
+---@param data table Data from Turn:to_session_turn()
+function SessionTurn:update(data)
+  self.assistant = data.assistant
+  self.reasoning = data.reasoning
+  self.status = data.status
+  self.message = data.message
+  self.finish_reason = data.finish_reason
+  self.update_time = os.time()
+end
 
 ---@class llm.SessionIndex
 ---@field id string
@@ -24,12 +65,16 @@ local SessionIndex = {}
 SessionIndex.__index = SessionIndex
 
 ---@class llm.Session: llm.SessionIndex
----@field content llm.session.Message[]
+---@field turns llm.session.Turn[]     -- 改为 turns 数组
+---@field next_turn_id integer         -- 下一个 turn 的自增 ID
 ---@field _title_generation_job? llm.RequestJob
 local Session = {}
 Session.__index = Session
 -- extend SessionIndex
 setmetatable(Session, SessionIndex)
+
+-- Constants
+Session.DEFAULT_TITLE = "New session"
 
 ---@class llm.SessionManager
 ---@field session_list table<string, llm.SessionIndex>
@@ -92,21 +137,27 @@ function Session:new(provider, model)
   local id = util.uuid()
   local this = {
     id = id,
-    title = id,
+    title = Session.DEFAULT_TITLE,
     create_time = os.time(),
     update_time = os.time(),
     provider = provider,
     model = model,
     inherited_count = 0,
-    content = {},
+    turns = {},
+    next_turn_id = 1,
   }
   return setmetatable(this, Session)
 end
 
----@param message llm.session.Message
-function Session:add_message(message)
-  table.insert(self.content, message)
+---Create new SessionTurn, add to session, and return it
+---@param user_message llm.session.Message
+---@return llm.session.Turn
+function Session:new_turn(user_message)
+  local turn = SessionTurn:new(self.next_turn_id, user_message)
+  table.insert(self.turns, turn)
+  self.next_turn_id = self.next_turn_id + 1
   self.update_time = os.time()
+  return turn
 end
 
 --- save current session and session index
@@ -119,14 +170,14 @@ function Session:save(opts)
     return
   end
 
-  if #self.content == 0 then
+  if #self.turns == 0 then
     if not opts.silent then
       notify.warn("empty session does not need to be saved.", string.format("session %s is empty.", self.id))
     end
     return
   end
 
-  io.write_json(self:get_file_path(), { id = self.id, content = self.content })
+  io.write_json(self:get_file_path(), { id = self.id, turns = self.turns, next_turn_id = self.next_turn_id })
 
   SessionManager:_save()
 
@@ -135,12 +186,18 @@ function Session:save(opts)
   end
 end
 
----filter the thinking messages
 ---@return llm.session.Message[]
-function Session:multi_round_filter()
-  return vim.tbl_filter(function(message)
-    return not message.reasoning_content
-  end, self.content)
+function Session:to_messages()
+  local messages = {}
+  for _, turn in ipairs(self.turns) do
+    if turn.status == TurnStatus.COMPLETE then
+      table.insert(messages, turn.user)
+      if turn.assistant then
+        table.insert(messages, turn.assistant)
+      end
+    end
+  end
+  return messages
 end
 
 ---@param id string
@@ -154,8 +211,8 @@ function SessionManager:_save()
     if getmetatable(item) == SessionIndex then
       return item
     elseif
-      -- only save session with content
-      getmetatable(item) == Session and #item--[[@as llm.Session]].content > 0
+      -- only save session with turns
+      getmetatable(item) == Session and #item--[[@as llm.Session]].turns > 0
     then
       return SessionIndex.toIndex(item)
     end
@@ -179,41 +236,35 @@ end
 function SessionManager:fork_session(source_session, carry_rounds)
   local new_session = Session:new(source_session.provider, source_session.model)
 
-  -- Calculate messages to copy
-  local messages_to_copy = {}
+  -- Calculate turns to copy
+  local turns_to_copy = {}
   if carry_rounds == "all" then
-    messages_to_copy = vim.deepcopy(source_session.content)
+    turns_to_copy = vim.deepcopy(source_session.turns)
   elseif type(carry_rounds) == "table" then
     -- Custom range in rounds: {start = x, end = y} or {start = x} (end defaults to last round)
-    local total_rounds = math.floor(#source_session.content / 2)
+    local total_rounds = #source_session.turns
     local start_round = math.max(1, carry_rounds.start or 1)
     local end_round = math.min(carry_rounds["end"] or total_rounds, total_rounds)
-    -- Convert round numbers to message indices
-    local start_idx = 2 * start_round - 1
-    local end_idx = end_round * 2
-    for i = start_idx, end_idx do
-      table.insert(messages_to_copy, vim.deepcopy(source_session.content[i]))
+    for i = start_round, end_round do
+      table.insert(turns_to_copy, vim.deepcopy(source_session.turns[i]))
     end
   else
     -- Specific round number: carry_rounds = 5 means the 5th round
     local round_idx = carry_rounds
-    local start_idx = 2 * round_idx - 1
-    local end_idx = round_idx * 2
-    if start_idx <= #source_session.content then
-      for i = start_idx, math.min(end_idx, #source_session.content) do
-        table.insert(messages_to_copy, vim.deepcopy(source_session.content[i]))
-      end
+    if round_idx <= #source_session.turns then
+      table.insert(turns_to_copy, vim.deepcopy(source_session.turns[round_idx]))
     end
   end
 
-  -- Copy messages
-  for _, msg in ipairs(messages_to_copy) do
-    new_session:add_message(msg)
+  -- Copy turns and restore SessionTurn metatable (lost in deepcopy)
+  for _, turn in ipairs(turns_to_copy) do
+    setmetatable(turn, SessionTurn)
+    table.insert(new_session.turns, turn)
   end
 
   -- Set fork markers
   new_session.forked_from = source_session.id
-  new_session.inherited_count = #messages_to_copy
+  new_session.inherited_count = #turns_to_copy
 
   -- Initial title
   new_session.title = "Fork: " .. source_session.title
@@ -236,11 +287,27 @@ function SessionManager:load(id)
     return
   end
   local content = io.read_json(path)
+
+  -- Check for old format (has content field instead of turns)
+  if content.content ~= nil then
+    error(string.format("Session file %s uses deprecated format (content field). Please migrate or delete.", id))
+  end
+
   local session = vim.tbl_deep_extend("force", {}, self.session_list[id], content)
   -- ensure inherited_count has a default value
   if session.inherited_count == nil then
     session.inherited_count = 0
   end
+  -- ensure next_turn_id has a default value
+  if session.next_turn_id == nil then
+    session.next_turn_id = #session.turns + 1
+  end
+
+  -- Deserialize turns to SessionTurn objects
+  for i, turn_data in ipairs(session.turns) do
+    session.turns[i] = setmetatable(turn_data, SessionTurn)
+  end
+
   -- cache the session
   SessionManager.session_list[id] = session
   return setmetatable(session, Session)
@@ -348,25 +415,26 @@ end
 ---@param select_callback? fun(session: llm.Session)
 ---@param delete_callback? fun(session: llm.SessionIndex, refresh: fun(), input_win: llm.win.FloatingWin)
 function SessionManager:open_selector(select_callback, delete_callback)
+  local sessions = self:session_selector()
   local picker = win.PickerWin:new {
     title = "sessions",
-    data_filter_wraper = function()
-      local data = self:session_selector()
-      return function(input)
-        return util.data_filter(input, data)
+    items = sessions,
+    on_change = function(input)
+      return util.data_filter(input, sessions)
+    end,
+    on_select = function(selected)
+      local session = self:get_selected_session(selected)
+      if session and select_callback then
+        select_callback(session)
       end
     end,
-    winOptions = config.options.session_picker_win,
-    enter_handler = function(selected)
-      local session = self:get_selected_session(selected)
-      if session then
-        if select_callback then
-          select_callback(session)
-        end
-      end
+    on_close = function()
+      -- cleanup if needed
     end,
   }
-  self:_register_operator_keymap(picker.wins.input, picker.wins.content, picker.refresh_data, delete_callback)
+  self:_register_operator_keymap(picker.wins.input, picker.wins.content, function()
+    picker:update_items(self:session_selector())
+  end, delete_callback)
 end
 
 -- <d> delete
@@ -445,5 +513,8 @@ function SessionManager:init(force)
   end
   return self
 end
+
+-- Export constants
+SessionManager.DEFAULT_TITLE = Session.DEFAULT_TITLE
 
 return SessionManager:init(true)

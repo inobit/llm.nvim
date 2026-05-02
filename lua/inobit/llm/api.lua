@@ -4,7 +4,7 @@ local SessionManager = require "inobit.llm.session"
 local ProviderManager = require "inobit.llm.provider"
 local translate = require "inobit.llm.translate"
 local notify = require "inobit.llm.notify"
-local dual_picker = require "inobit.llm.dual_picker"
+local ui = require "inobit.llm.ui"
 local models = require "inobit.llm.models"
 local config = require "inobit.llm.config"
 
@@ -71,34 +71,63 @@ M.open_session_selector = function()
   end)
 end
 
-M.open_chat_provider_selector = function()
-  -- Check if there's a foreground chat
-  local current_chat = ChatManager.last_used_chat
-  local has_foreground_chat = current_chat and current_chat:is_foreground()
+M.open_provider_selector = function()
+  -- First, select scenario
+  local scenario_items = {}
+  for _, scenario in pairs(config.Scenario) do
+    table.insert(scenario_items, scenario:sub(1, 1):upper() .. scenario:sub(2))
+  end
 
-  dual_picker.DualPickerWin:new {
-    title = has_foreground_chat and "Change model for current chat" or "Select chat provider@model",
-    provider_type = "chat",
-    on_confirm = function(provider_name, model_id)
-      if has_foreground_chat then
-        -- Switch model for current foreground chat
-        current_chat:change_model(provider_name, model_id)
-      else
-        -- Set global default provider (for new chats)
-        ProviderManager.chat_provider = ProviderManager:resolve_provider(provider_name, model_id)
-        notify.info("Selected: " .. provider_name .. "@" .. model_id .. " (for new chats)")
+  -- Store selection state to use in close_post_handler
+  local selected_scenario = nil
+  local has_foreground_chat = false
+  ---@type llm.Chat
+  local current_chat = nil
+
+  ui.PickerWin:new {
+    title = "Select scenario",
+    size = "tiny",
+    items = scenario_items,
+    on_select = function(scenario)
+      if not scenario then
+        return
+      end
+      -- Convert back to lowercase for internal use
+      selected_scenario = scenario:lower()
+
+      -- Find the foreground chat for chat scenario
+      if selected_scenario == config.Scenario.CHAT then
+        for _, chat in pairs(ChatManager.chats) do
+          if chat:is_foreground() then
+            current_chat = chat
+            has_foreground_chat = true
+            break
+          end
+        end
       end
     end,
-  }
-end
+    close_post_handler = function()
+      -- Only open dual picker if a scenario was selected
+      if not selected_scenario then
+        return
+      end
 
-M.open_translate_provider_selector = function()
-  dual_picker.DualPickerWin:new {
-    title = "Select translate provider@model",
-    provider_type = "translate",
-    on_confirm = function(provider_name, model_id)
-      ProviderManager.translate_provider = ProviderManager:resolve_provider(provider_name, model_id)
-      notify.info("Selected: " .. provider_name .. "@" .. model_id)
+      -- Then open dual picker for provider and model selection
+      ui.DualPickerWin:new {
+        title = has_foreground_chat and "Change model for current chat"
+          or "Select " .. selected_scenario .. " provider@model",
+        scenario = selected_scenario,
+        on_confirm = function(provider_name, model_id)
+          -- Set global default provider for the scenario
+          ProviderManager.scenario_providers[selected_scenario] =
+            ProviderManager:resolve_provider(provider_name, model_id)
+          if has_foreground_chat then
+            -- Switch model for current foreground chat
+            current_chat:change_model(provider_name, model_id)
+          end
+          notify.info("Selected: " .. provider_name .. "@" .. model_id .. " (for " .. selected_scenario .. ")")
+        end,
+      }
     end,
   }
 end
@@ -123,10 +152,7 @@ M.toggle_chat = function()
 
   -- If there's a foreground chat, close it; otherwise open new (or restore last)
   if last_chat and last_chat:is_foreground() then
-    local response_win = last_chat.win.wins.response.winid
-    local input_win = last_chat.win.wins.input.winid
-    pcall(vim.api.nvim_win_close, input_win, true)
-    pcall(vim.api.nvim_win_close, response_win, true)
+    last_chat.win:close()
   else
     ChatManager:new()
   end
