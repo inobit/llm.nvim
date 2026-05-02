@@ -1,70 +1,312 @@
--- lua/inobit/llm/dual_picker.lua
 local M = {}
 
+local stack = require "inobit.llm.ui.stack"
+local base = require "inobit.llm.ui.base"
 local config = require "inobit.llm.config"
-local win = require "inobit.llm.win"
-local models = require "inobit.llm.models"
 local util = require "inobit.llm.util"
 local notify = require "inobit.llm.notify"
 local spinner = require "inobit.llm.spinner"
+local models = require "inobit.llm.models"
+-- ProviderManager is loaded lazily in DualPickerWin to avoid circular dependency
 
----@alias llm.dual_picker.Focus "provider" | "model"
+-- Export from dependencies
+M.WinStack = stack.WinStack
+M.FloatingWin = base.FloatingWin
 
----@class llm.dual_picker.Options
+-- ============================================================================
+-- Picker Window (from win.lua)
+-- ============================================================================
+
+---@alias llm.ui.pickerWin.PaneKind
+---| "input"
+---| "content"
+
+---@alias llm.ui.PickerWinSize "tiny" | "small" | "medium" | "large"
+
+---@class llm.ui.PickerWinOptions
 ---@field title string
----@field provider_type ProviderType
+---@field size? llm.ui.PickerWinSize default "medium"
+---@field items string[] initial data list
+---@field on_change? fun(input: string): string[] filter callback, return new list
+---@field on_select fun(selected: string) confirm callback
+---@field on_close? fun() close callback
+---@field close_prev_handler? fun()
+---@field close_post_handler? fun()
+
+---@class llm.ui.PickerWin
+---@field title string
+---@field id string
+---@field wins table<llm.ui.pickerWin.PaneKind, llm.ui.FloatingWin>
+---@field _items string[]
+---@field _on_change? fun(input: string): string[]
+---@field _on_select fun(selected: string)
+---@field _on_close? fun()
+---@field _close_prev_handler? fun()
+---@field _close_post_handler? fun()
+---@field _closed? boolean
+M.PickerWin = {}
+M.PickerWin.__index = M.PickerWin
+
+function M.PickerWin:_register_picker_line_move()
+  vim.keymap.set("n", "j", function()
+    local lines = vim.api.nvim_buf_line_count(self.wins.content.bufnr)
+    local cur_line = vim.api.nvim_win_get_cursor(self.wins.content.winid)
+    local next_line = nil
+    if cur_line[1] + 1 > lines then
+      next_line = 1
+    else
+      next_line = cur_line[1] + 1
+    end
+    vim.api.nvim_win_set_cursor(self.wins.content.winid, { next_line, 0 })
+    vim.api.nvim_set_option_value("cursorline", true, { win = self.wins.content.winid })
+  end, { buffer = self.wins.input.bufnr })
+
+  vim.keymap.set("n", "k", function()
+    local lines = vim.api.nvim_buf_line_count(self.wins.content.bufnr)
+    local cur_line = vim.api.nvim_win_get_cursor(self.wins.content.winid)
+    local next_line = nil
+    if cur_line[1] - 1 == 0 then
+      next_line = lines
+    else
+      next_line = cur_line[1] - 1
+    end
+    vim.api.nvim_win_set_cursor(self.wins.content.winid, { next_line, 0 })
+    vim.api.nvim_set_option_value("cursorline", true, { win = self.wins.content.winid })
+  end, { buffer = self.wins.input.bufnr })
+end
+
+function M.PickerWin:close()
+  if self._closed then
+    return
+  end
+  self._closed = true
+
+  if self._close_prev_handler then
+    self._close_prev_handler()
+  end
+
+  if self._on_close then
+    self._on_close()
+  end
+
+  -- Close windows and delete buffers
+  for _, win in pairs(self.wins) do
+    pcall(vim.api.nvim_buf_delete, win.bufnr, { force = true })
+    win:close()
+  end
+
+  if self._close_post_handler then
+    self._close_post_handler()
+  end
+
+  -- Pop from stack and restore focus to top valid window
+  for _, win in pairs(self.wins) do
+    M.WinStack:pop(win.winid)
+  end
+end
+
+---@private
+function M.PickerWin:_register_close_picker_win()
+  local this = self
+  for _, win in pairs(self.wins) do
+    vim.keymap.set({ "n" }, "q", function()
+      this:close()
+    end, { buffer = win.bufnr, noremap = true, silent = true })
+  end
+  -- Register WinClosed to handle :q or other close methods
+  vim.api.nvim_create_augroup(self.id .. "close", { clear = false })
+  for _, win in pairs(self.wins) do
+    vim.api.nvim_create_autocmd("WinClosed", {
+      group = self.id .. "close",
+      buffer = win.bufnr,
+      once = true,
+      callback = function()
+        this:close()
+      end,
+    })
+  end
+end
+
+---@private
+---@param enter_handler fun()
+function M.PickerWin:_register_picker_enter(enter_handler)
+  vim.keymap.set("n", "<CR>", function()
+    enter_handler()
+  end, { buffer = self.wins.input.bufnr })
+end
+
+---@param opts llm.ui.PickerWinOptions
+---@return llm.ui.PickerWin
+function M.PickerWin:new(opts)
+  ---@type llm.ui.PickerWin
+  local this = setmetatable({}, M.PickerWin)
+  this.title = opts.title
+  this.id = util.uuid()
+
+  local cur_win = vim.api.nvim_get_current_win()
+
+  -- Size configurations
+  local size = opts.size or "medium"
+  local size_config = {
+    tiny = { width = 0.2, height = 0.2 },
+    small = { width = 0.3, height = 0.3 },
+    medium = { width = 0.5, height = 0.5 },
+    large = { width = 0.8, height = 0.8 },
+  }
+  local selected_config = size_config[size] or size_config.medium
+
+  local input_height = 1
+  local width = math.floor(vim.o.columns * selected_config.width)
+  local content_height = math.floor(vim.o.lines * selected_config.height)
+  local input_top = (vim.o.lines - input_height - content_height) / 2
+  local content_top = input_top + input_height + 2
+  local left = (vim.o.columns - width) / 2
+
+  local input_win = M.FloatingWin:new {
+    width = width,
+    height = input_height,
+    row = input_top,
+    col = left,
+    winblend = 0,
+    zindex = M.WinStack._zindex,
+    title = "input",
+    relative = "editor",
+    style = "minimal",
+    border = "rounded",
+    title_pos = "center",
+    focusable = true,
+  }
+
+  local content_win = M.FloatingWin:new {
+    width = width,
+    height = content_height,
+    row = content_top,
+    col = left,
+    winblend = 0,
+    zindex = M.WinStack._zindex,
+    title = opts.title,
+    relative = "editor",
+    style = "minimal",
+    border = "rounded",
+    title_pos = "center",
+    focusable = true,
+  }
+
+  M.WinStack:_zindex_increment()
+
+  this.wins = { input = input_win, content = content_win }
+  this._items = opts.items or {}
+  this._on_change = opts.on_change
+  this._on_select = opts.on_select
+  this._on_close = opts.on_close
+  this._close_prev_handler = opts.close_prev_handler
+  this._close_post_handler = opts.close_post_handler
+
+  M.WinStack:push(input_win.winid)
+  M.WinStack:push(content_win.winid)
+
+  vim.api.nvim_set_option_value("wrap", false, { win = content_win.winid })
+  vim.api.nvim_set_current_win(input_win.winid)
+
+  content_win:register_content_change()
+  this:_register_close_picker_win()
+  this:_register_picker_line_move()
+
+  -- Initial render
+  this:update_items(this._items)
+
+  -- Register input filter
+  this:_register_input_filter()
+
+  -- Register enter handler
+  this:_register_picker_enter(function()
+    local line = util.get_current_line(content_win.bufnr, content_win.winid)
+    if line and this._on_select then
+      this._on_select(line)
+      this:close()
+    end
+  end)
+
+  return this
+end
+
+---Update displayed items
+---@param items string[]
+function M.PickerWin:update_items(items)
+  self._items = items
+  if self.wins.content and vim.api.nvim_buf_is_valid(self.wins.content.bufnr) then
+    vim.api.nvim_buf_set_lines(self.wins.content.bufnr, 0, -1, false, items)
+  end
+end
+
+---@private
+function M.PickerWin:_register_input_filter()
+  local this = self
+  vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
+    buffer = this.wins.input.bufnr,
+    callback = function()
+      local input = vim.api.nvim_buf_get_lines(this.wins.input.bufnr, 0, 1, false)[1] or ""
+      if this._on_change then
+        local filtered = this._on_change(input)
+        this:update_items(filtered)
+      end
+    end,
+  })
+end
+
+-- ============================================================================
+-- Dual Picker Window (from dual_picker.lua)
+-- ============================================================================
+
+---@alias llm.ui.DualPickerFocus "provider" | "model"
+
+---@class llm.ui.DualPickerOptions
+---@field title string
+---@field scenario Scenario
 ---@field on_confirm fun(provider_name: string, model_id: string)
 ---@field close_prev_handler? fun()
 ---@field close_post_handler? fun()
 
----@class llm.DualPickerWin
+---@class llm.ui.DualPickerWin
 ---@field id string
----@field focus llm.dual_picker.Focus
----@field provider_type ProviderType  -- "chat" or "translate"
----@field input_win llm.win.FloatingWin
----@field provider_win llm.win.FloatingWin
----@field model_win llm.win.FloatingWin
+---@field focus llm.ui.DualPickerFocus
+---@field scenario Scenario
+---@field input_win llm.ui.FloatingWin
+---@field provider_win llm.ui.FloatingWin
+---@field model_win llm.ui.FloatingWin
 ---@field selected_provider string
 ---@field selected_model string?
 ---@field provider_list string[]
 ---@field filtered_provider_list string[]
 ---@field model_list string[]
 ---@field filtered_model_list string[]
----@field spinner_obj llm.FloatSpinner
+---@field spinner_obj llm.WinSpinner
 ---@field on_confirm fun(provider_name: string, model_id: string)
 M.DualPickerWin = {}
 M.DualPickerWin.__index = M.DualPickerWin
 
----@param opts llm.dual_picker.Options
----@return llm.DualPickerWin
+---@param opts llm.ui.DualPickerOptions
+---@return llm.ui.DualPickerWin
 function M.DualPickerWin:new(opts)
+  -- Lazy load ProviderManager to avoid circular dependency
+  local ProviderManager = require "inobit.llm.provider"
+
   self = { id = util.uuid() }
   setmetatable(self, M.DualPickerWin)
 
   self.on_confirm = opts.on_confirm
-  self.provider_type = opts.provider_type
-  self.focus = "model" -- Default focus on model (search and navigation target)
+  self.scenario = opts.scenario
+  self.focus = "provider" -- Default focus on provider
   self.spinner_obj = nil -- Will be created after model_win
   self.model_list = {}
   self.filtered_model_list = {}
 
-  -- Get provider list from config
-  -- chat type: only show chat-type providers
-  -- translate type: show all providers (chat providers can be used for translation)
-  self.provider_list = vim.tbl_filter(function(name)
-    local p = config.providers[name]
-    if opts.provider_type == "chat" then
-      return p and p.provider_type == "chat"
-    else
-      -- translate type: show all providers
-      return p ~= nil
-    end
-  end, vim.tbl_keys(config.providers))
-  table.sort(self.provider_list)
+  -- Get provider list for the specified scenario
+  self.provider_list = ProviderManager:get_providers_for_scenario(opts.scenario)
   self.filtered_provider_list = self.provider_list
 
   if #self.provider_list == 0 then
-    notify.error("No providers configured for type: " .. opts.provider_type)
+    notify.error("No providers configured for scenario: " .. opts.scenario)
     return self
   end
 
@@ -74,7 +316,7 @@ function M.DualPickerWin:new(opts)
   self:_create_windows()
 
   -- Create spinner anchored to model_win
-  self.spinner_obj = spinner.FloatSpinner:new(self.model_win)
+  self.spinner_obj = spinner.WinSpinner:new(self.model_win, "top-left")
 
   -- Populate provider list
   self:_render_provider_list()
@@ -94,17 +336,15 @@ function M.DualPickerWin:new(opts)
   -- Set initial focused border color
   self:_update_focus_border()
 
-  -- Set initial focus to input window
-  vim.api.nvim_set_current_win(self.input_win.winid)
-  vim.cmd.startinsert()
+  -- Set focus to the focused window (provider initially)
+  local target_win = self.focus == "provider" and self.provider_win.winid or self.model_win.winid
+  vim.api.nvim_set_current_win(target_win)
 
   return self
 end
 
 ---@private
 function M.DualPickerWin:_create_windows()
-  local picker_opts = config.options.provider_picker_win
-
   -- Calculate dimensions (accounting for borders)
   -- Border adds 2 to width/height
   local total_width = math.floor(vim.o.columns * 0.7)
@@ -112,8 +352,8 @@ function M.DualPickerWin:_create_windows()
   local provider_width = math.floor(total_width * 0.2) - 1
   local model_width = total_width - provider_width - 2
 
-  local input_height = picker_opts.input_height or 1
-  local content_height = math.floor(vim.o.lines * picker_opts.content_height_percentage)
+  local input_height = 1
+  local content_height = math.floor(vim.o.lines * 0.5)
 
   -- Layout: Provider spans full height, Input+Model stacked on right
   -- Total height = input + content + borders (4)
@@ -124,14 +364,14 @@ function M.DualPickerWin:_create_windows()
   local model_col = col + provider_width + 2 -- right side column
 
   -- Provider window (full height on left)
-  ---@type llm.win.WinConfig
+  ---@type llm.ui.WinConfig
   local provider_opts = {
     width = provider_width,
     height = input_height + content_height + 2, -- +2 for gap between input and model
     row = top_row,
     col = col,
-    winblend = picker_opts.winblend,
-    zindex = win.WinStack._zindex,
+    winblend = 0,
+    zindex = M.WinStack._zindex,
     title = "Provider",
     relative = "editor",
     style = "minimal",
@@ -140,14 +380,14 @@ function M.DualPickerWin:_create_windows()
   }
 
   -- Input window (top right, aligned with model)
-  ---@type llm.win.WinConfig
+  ---@type llm.ui.WinConfig
   local input_opts = {
     width = model_width,
     height = input_height,
     row = top_row,
     col = model_col,
-    winblend = picker_opts.winblend,
-    zindex = win.WinStack._zindex,
+    winblend = 0,
+    zindex = M.WinStack._zindex,
     title = "Search",
     relative = "editor",
     style = "minimal",
@@ -156,14 +396,14 @@ function M.DualPickerWin:_create_windows()
   }
 
   -- Model window (bottom right)
-  ---@type llm.win.WinConfig
+  ---@type llm.ui.WinConfig
   local model_opts = {
     width = model_width,
     height = content_height,
     row = top_row + input_height + 2, -- +2 for input border
     col = model_col,
-    winblend = picker_opts.winblend,
-    zindex = win.WinStack._zindex,
+    winblend = 0,
+    zindex = M.WinStack._zindex,
     title = "Model",
     relative = "editor",
     style = "minimal",
@@ -171,17 +411,17 @@ function M.DualPickerWin:_create_windows()
     title_pos = "center",
   }
 
-  win.WinStack:_zindex_increment()
+  M.WinStack:_zindex_increment()
 
-  self.provider_win = win.FloatingWin:new(provider_opts)
-  self.input_win = win.FloatingWin:new(input_opts)
-  self.model_win = win.FloatingWin:new(model_opts)
+  self.provider_win = M.FloatingWin:new(provider_opts)
+  self.input_win = M.FloatingWin:new(input_opts)
+  self.model_win = M.FloatingWin:new(model_opts)
 
   -- Push to win stack
   local cur_win = vim.api.nvim_get_current_win()
-  win.WinStack:push(self.provider_win.winid, cur_win)
-  win.WinStack:push(self.input_win.winid, cur_win)
-  win.WinStack:push(self.model_win.winid, cur_win)
+  M.WinStack:push(self.provider_win.winid)
+  M.WinStack:push(self.input_win.winid)
+  M.WinStack:push(self.model_win.winid)
 
   -- Set options
   vim.api.nvim_set_option_value("wrap", false, { win = self.provider_win.winid })
@@ -216,7 +456,10 @@ end
 
 ---@private
 function M.DualPickerWin:_apply_filter()
-  -- Search always filters model list, regardless of current focus
+  -- Search only filters model list when focus is on model
+  if self.focus ~= "model" then
+    return
+  end
   local input = vim.api.nvim_buf_get_lines(self.input_win.bufnr, 0, 1, false)[1] or ""
   self.filtered_model_list = util.data_filter(input, self.model_list)
   self:_render_model_list()
@@ -279,26 +522,15 @@ function M.DualPickerWin:load_models(provider_name)
   self.model_list = override_models
   self.filtered_model_list = override_models
 
-  -- Set default model based on provider_type
-  local default_model
-  if self.provider_type == "chat" then
-    default_model = provider_config.default_chat_model or provider_config.default_model
-  elseif self.provider_type == "translate" then
-    default_model = provider_config.default_translate_model or provider_config.default_model
-  else
-    default_model = provider_config.default_model
-  end
-
-  if default_model and vim.tbl_contains(self.model_list, default_model) then
-    self.selected_model = default_model
-  elseif #self.model_list > 0 then
-    self.selected_model = self.model_list[1]
-  end
-
   -- Apply current filter and render
   local input = vim.api.nvim_buf_get_lines(self.input_win.bufnr, 0, 1, false)[1] or ""
   self.filtered_model_list = util.data_filter(input, self.model_list)
   self:_render_model_list()
+
+  -- Set initial selected model to first item
+  if #self.filtered_model_list > 0 then
+    self.selected_model = self.filtered_model_list[1]
+  end
 
   -- Fetch additional models asynchronously if enabled
   if provider_config.fetch_models then
@@ -340,6 +572,15 @@ end
 
 ---@private
 function M.DualPickerWin:_register_keymaps()
+  -- Helper to register keymaps for all three windows
+  local function register_for_all_windows(modes, keys, callback)
+    for _, win in ipairs { self.input_win, self.provider_win, self.model_win } do
+      for _, mode in ipairs(modes) do
+        vim.keymap.set(mode, keys, callback, { buffer = win.bufnr, silent = true })
+      end
+    end
+  end
+
   -- Insert mode: only Esc to exit, search applies to model only
   vim.keymap.set("i", "<Esc>", function()
     vim.cmd.stopinsert()
@@ -350,32 +591,29 @@ function M.DualPickerWin:_register_keymaps()
     self:_handle_enter()
   end, { buffer = self.input_win.bufnr })
 
-  vim.keymap.set("i", "<Tab>", function()
+  -- Tab to switch focus - available in all windows
+  register_for_all_windows({ "i", "n" }, "<Tab>", function()
     self:_switch_focus()
-  end, { buffer = self.input_win.bufnr })
+  end)
 
-  -- Normal mode in input window: navigation and actions
-  vim.keymap.set("n", "j", function()
+  -- Normal mode navigation - available in all windows
+  register_for_all_windows({ "n" }, "j", function()
     self:_move_cursor_down()
-  end, { buffer = self.input_win.bufnr })
+  end)
 
-  vim.keymap.set("n", "k", function()
+  register_for_all_windows({ "n" }, "k", function()
     self:_move_cursor_up()
-  end, { buffer = self.input_win.bufnr })
+  end)
 
-  vim.keymap.set("n", "<Tab>", function()
-    self:_switch_focus()
-  end, { buffer = self.input_win.bufnr })
-
-  vim.keymap.set("n", "<CR>", function()
+  register_for_all_windows({ "n" }, "<CR>", function()
     self:_handle_enter()
-  end, { buffer = self.input_win.bufnr })
+  end)
 
-  vim.keymap.set("n", "r", function()
+  register_for_all_windows({ "n" }, "r", function()
     self:refresh_models()
-  end, { buffer = self.input_win.bufnr })
+  end)
 
-  -- Enter insert mode with i
+  -- Enter insert mode with i - only in input window
   vim.keymap.set("n", "i", function()
     vim.cmd.startinsert()
   end, { buffer = self.input_win.bufnr })
@@ -434,12 +672,12 @@ function M.DualPickerWin:_switch_focus()
   -- Toggle focus between provider and model
   if self.focus == "provider" then
     self.focus = "model"
-    -- Move cursor to first model (keep search filter)
-    if #self.filtered_model_list > 0 then
-      vim.api.nvim_win_set_cursor(self.model_win.winid, { 1, 0 })
-    end
+    -- Move cursor to input window and enter insert mode
+    vim.api.nvim_set_current_win(self.input_win.winid)
+    vim.cmd.startinsert()
   else
     self.focus = "provider"
+    vim.cmd.stopinsert()
     -- Move cursor to current selected provider
     local idx = 1
     for i, name in ipairs(self.provider_list) do
@@ -448,6 +686,7 @@ function M.DualPickerWin:_switch_focus()
         break
       end
     end
+    vim.api.nvim_set_current_win(self.provider_win.winid)
     vim.api.nvim_win_set_cursor(self.provider_win.winid, { idx, 0 })
   end
   -- Update focused border color
@@ -492,10 +731,7 @@ function M.DualPickerWin:_confirm_selection()
   -- Stop spinner if running
   self:_stop_spinner()
 
-  -- Clean up windows before callback
-  win.WinStack:delete(self.input_win.winid)
-  win.WinStack:delete(self.provider_win.winid)
-  win.WinStack:delete(self.model_win.winid)
+  -- Clean up windows before callback (skip_focus, let WinClosed handle focus)
   self.input_win:close()
   self.provider_win:close()
   self.model_win:close()
@@ -557,12 +793,15 @@ function M.DualPickerWin:_register_close_handler(close_prev_handler, close_post_
           close_prev_handler()
         end
         for _, other in ipairs(wins) do
-          win.WinStack:pop(other.winid)
           pcall(vim.api.nvim_win_close, other.winid, true)
         end
         pcall(vim.api.nvim_del_augroup_by_name, self.id .. "close")
         if close_post_handler and w.bufnr == args.buf then
           close_post_handler()
+        end
+        -- Pop all windows from stack and restore focus to top valid window
+        for _, other in ipairs(wins) do
+          M.WinStack:pop(other.winid)
         end
       end,
     })
