@@ -1,50 +1,84 @@
 local M = {}
 
-local config = require "inobit.llm.config"
-
+-- Namespace for UI elements (retry hints, etc.)
+-- Block highlighting uses blocks.lua namespace
 local NAMESPACE = vim.api.nvim_create_namespace "inobit_llm_session"
 
 M.NAMESPACE = NAMESPACE
 
----Setup highlight group based on configuration
----Supports:
---- - "GroupName" - link to another highlight group (e.g., "MoreMsg", "Question")
---- - { fg = ..., bg = ..., ... } - custom color table
-function M.setup_highlight()
-  local question_hi = config.options.question_hi
+---Get highlight configuration for inobit blocks
+---@return table<string, string|vim.api.keyset.highlight>
+function M.get_inobit_highlight_config()
+  local config = require "inobit.llm.config"
+  local opts = config.options or {}
+  return {
+    question = opts.question_hi or "Question",
+    reasoning = opts.reasoning_hi or "Comment",
+    thinking = opts.thinking_hi or "Comment",
+    response = opts.response_hi or "Normal",
+    error = opts.error_hi or "ErrorMsg",
+    warning = opts.warning_hi or "WarningMsg",
+    spinner = opts.spinner_hi or "Comment",
+  }
+end
 
-  if type(question_hi) == "string" then
-    -- link to existing highlight group
-    vim.cmd("highlight! link InobitQuestion " .. question_hi)
+---Setup inobit-specific highlights
+---Defines highlight groups used by extmark-based block highlighting
+---This is called from config.setup() after options are set
+function M.setup_inobit_highlights()
+  local hl_config = M.get_inobit_highlight_config()
+
+  -- Question - user message (blue/purple theme)
+  if type(hl_config.question) == "string" then
+    vim.cmd("highlight! link InobitQuestion " .. hl_config.question)
   else
-    -- custom color table
-    vim.api.nvim_set_hl(0, "InobitQuestion", question_hi --[[@as vim.api.keyset.highlight]])
+    vim.api.nvim_set_hl(0, "InobitQuestion", hl_config.question --[[@as vim.api.keyset.highlight]])
   end
-end
 
--- Initialize highlight on module load
-M.setup_highlight()
+  -- Reasoning - thinking process (dimmed/gray)
+  if type(hl_config.reasoning) == "string" then
+    vim.cmd("highlight! link InobitReasoning " .. hl_config.reasoning)
+  else
+    vim.api.nvim_set_hl(0, "InobitReasoning", hl_config.reasoning --[[@as vim.api.keyset.highlight]])
+  end
 
----@param buf integer
----@param start_row integer 0-indexed
----@param end_row integer 0-indexed (empty line index, user message ends at end_row-1)
----@param message_index integer index in session.content
-function M.set_user_message_extmark(buf, start_row, end_row, message_index)
-  -- Extmark for retry detection: covers user message only (start_row to end_row-1)
-  -- end_row is the empty line index, extmark's end_row is exclusive so actual range is [start_row, end_row-1]
-  vim.api.nvim_buf_set_extmark(buf, NAMESPACE, start_row, 0, {
-    end_row = end_row, -- exclusive: covers user message, excludes empty line
-    id = message_index,
-  })
+  -- Reasoning header/border - same as reasoning, slightly bold
+  vim.api.nvim_set_hl(0, "InobitReasoningHeader", { link = "InobitReasoning" })
 
-  -- Highlight user message content only, exclude empty line
-  -- end_row-1 is the actual last line of user message
-  vim.highlight.range(buf, NAMESPACE, "InobitQuestion", { start_row, 0 }, { end_row - 1, -1 }, { inclusive = true })
-end
+  -- Thinking - temporary thinking indicator (same as reasoning by default)
+  if type(hl_config.thinking) == "string" then
+    vim.cmd("highlight! link InobitThinking " .. hl_config.thinking)
+  else
+    vim.api.nvim_set_hl(0, "InobitThinking", hl_config.thinking --[[@as vim.api.keyset.highlight]])
+  end
 
----@param buf integer
-function M.clear_extmarks(buf)
-  vim.api.nvim_buf_clear_namespace(buf, NAMESPACE, 0, -1)
+  -- Response - normal content
+  if type(hl_config.response) == "string" then
+    vim.cmd("highlight! link InobitResponse " .. hl_config.response)
+  else
+    vim.api.nvim_set_hl(0, "InobitResponse", hl_config.response --[[@as vim.api.keyset.highlight]])
+  end
+
+  -- Error - error messages (red)
+  if type(hl_config.error) == "string" then
+    vim.cmd("highlight! link InobitError " .. hl_config.error)
+  else
+    vim.api.nvim_set_hl(0, "InobitError", hl_config.error --[[@as vim.api.keyset.highlight]])
+  end
+
+  -- Warning - warning/cancel messages (yellow/orange)
+  if type(hl_config.warning) == "string" then
+    vim.cmd("highlight! link InobitWarning " .. hl_config.warning)
+  else
+    vim.api.nvim_set_hl(0, "InobitWarning", hl_config.warning --[[@as vim.api.keyset.highlight]])
+  end
+
+  -- Spinner - loading animation (gray/comment)
+  if type(hl_config.spinner) == "string" then
+    vim.cmd("highlight! link InobitSpinner " .. hl_config.spinner)
+  else
+    vim.api.nvim_set_hl(0, "InobitSpinner", hl_config.spinner --[[@as vim.api.keyset.highlight]])
+  end
 end
 
 return M
